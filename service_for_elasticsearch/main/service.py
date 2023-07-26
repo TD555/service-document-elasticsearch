@@ -599,33 +599,33 @@ async def update():
 
     
     
-@app.route("/delete/<string:document_id>", methods=["DELETE"])
-async def delete(document_id):
+# @app.route("/delete/<string:document_id>", methods=["DELETE"])
+# async def delete(document_id):
     
-    query = {
-        "query": {
-            "match": {
-                "doc_id": document_id
-            }
-        }
-    }
+#     query = {
+#         "query": {
+#             "match": {
+#                 "doc_id": document_id
+#             }
+#         }
+#     }
 
-    # Use the delete_by_query API to delete all documents that match the query
-    response = es.delete_by_query(index=INDEX, body=query)
-    print(response)
-    if response['deleted']:
-        return {'message' : f"Document was deleted from database.", 'status' : 200}
-    else: return {'message' : f"Document doesn't exist in database.", 'status' : 400}
+#     # Use the delete_by_query API to delete all documents that match the query
+#     response = es.delete_by_query(index=INDEX, body=query)
+#     print(response)
+#     if response['deleted']:
+#         return {'message' : f"Document was deleted from database.", 'status' : 200}
+#     else: return {'message' : f"Document doesn't exist in database.", 'status' : 400}
     
     
-@app.route("/clean", methods=["DELETE"])    
-async def clean():
-    query = {
-        "query": {
-            "match_all": {}
-        }
-    }
+# @app.route("/clean", methods=["DELETE"])    
+# async def clean():
+#     query = {
+#         "query": {
+#             "match_all": {}
+#         }
+#     }
 
-    if es.delete_by_query(index=INDEX, body=query)['deleted']:
-        return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
-    else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})
+#     if es.delete_by_query(index=INDEX, body=query)['deleted']:
+#         return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
+#     else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})
