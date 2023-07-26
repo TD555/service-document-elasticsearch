@@ -1,0 +1,11 @@
+__pycache__/
+Include/
+Lib/
+Scripts/
+pyvenv.cfg
+test.ipynb
+share/
+.vscode/
+service_for_elasticsearch/testing
+service_for_elasticsearch/main/preprocess.py
+service_for_elasticsearch/GUI
