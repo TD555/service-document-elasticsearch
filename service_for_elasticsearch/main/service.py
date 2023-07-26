@@ -352,10 +352,12 @@ def get_page():
                         "match": {
                             "filename": {
                                 "query": keyword.strip(),
-                                "fuzziness": "AUTO"
+                                "operator" : "AND",
+                                "fuzziness": "AUTO",
+                                "analyzer" : "my_analyzer",
                             }
                         }
-                    }
+                    },
                 ]
             }
         },
@@ -364,7 +366,9 @@ def get_page():
                 "page_content": {
                     "type": "plain",
                     "fragmenter": "span"},
-                "filename" : {}
+                "filename" : {
+                    "type": "plain",
+                    "fragmenter": "span"}
             }
         },
         "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "color", "default_image"]
