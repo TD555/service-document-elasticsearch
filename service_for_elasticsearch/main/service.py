@@ -278,7 +278,8 @@ async def upload_document(data):
         abort(500, 'Failed to read document.')   
         
     finally:
-        file.close()
+        if file:
+            file.close()
     
     for page_num, page_content in enumerate(texts):
 
