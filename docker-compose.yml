@@ -19,7 +19,7 @@ services:
       - elasticsearch
     container_name: service
     ports:
-      - 5000:8590
+      - 8590:5000
     environment:
       PYTHONUNBUFFERED: 0
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
