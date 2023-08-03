@@ -174,8 +174,8 @@ def info():
     return __description__
 
 
-@app.route("/upload", methods=["POST"])
-async def upload():
+@app.route("/create", methods=["POST"])
+async def create():
 
 #   ---Get file and parse content---
 
@@ -599,7 +599,7 @@ async def update():
 
     
     
-@app.route("/delete/<string:document_id>", methods=["DELETE"])
+# @app.route("/delete/<string:document_id>", methods=["DELETE"])
 async def delete(document_id):
     
     query = {
@@ -618,14 +618,14 @@ async def delete(document_id):
     else: return {'message' : f"Document doesn't exist in database.", 'status' : 400}
     
     
-@app.route("/clean", methods=["DELETE"])    
-async def clean():
-    query = {
-        "query": {
-            "match_all": {}
-        }
-    }
+# @app.route("/clean", methods=["DELETE"])    
+# async def clean():
+#     query = {
+#         "query": {
+#             "match_all": {}
+#         }
+#     }
 
-    if es.delete_by_query(index=INDEX, body=query)['deleted']:
-        return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
-    else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})
+#     if es.delete_by_query(index=INDEX, body=query)['deleted']:
+#         return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
+#     else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})
