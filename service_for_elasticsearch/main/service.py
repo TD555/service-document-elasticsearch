@@ -24,7 +24,7 @@ app = Flask(__name__)
 # API_KEY = "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"
 # MODEL = "gpt-3.5-turbo"
 
-URL = "http://192.168.0.176:5000"
+# URL = "http://192.168.0.176:5000"
 INDEX = 'my_index'
 
 es_host = os.environ['ELASTICSEARCH_URL']
@@ -600,7 +600,7 @@ async def update():
 
     
     
-# @app.route("/delete/<string:document_id>", methods=["DELETE"])
+@app.route("/delete/<string:document_id>", methods=["DELETE"])
 async def delete(document_id):
     
     query = {
@@ -619,14 +619,14 @@ async def delete(document_id):
     else: return {'message' : f"Document doesn't exist in database.", 'status' : 400}
     
     
-# @app.route("/clean", methods=["DELETE"])    
-# async def clean():
-#     query = {
-#         "query": {
-#             "match_all": {}
-#         }
-#     }
+@app.route("/clean", methods=["DELETE"])    
+async def clean():
+    query = {
+        "query": {
+            "match_all": {}
+        }
+    }
 
-#     if es.delete_by_query(index=INDEX, body=query)['deleted']:
-#         return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
-#     else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})
+    if es.delete_by_query(index=INDEX, body=query)['deleted']:
+        return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
+    else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})

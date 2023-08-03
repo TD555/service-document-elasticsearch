@@ -22,7 +22,7 @@ services:
       - 8590:5000
     environment:
       PYTHONUNBUFFERED: 0
-      ELASTICSEARCH_URL: "http://elasticsearch:9201"
+      ELASTICSEARCH_URL: "http://elasticsearch:9200"
 
 volumes:
   elasticsearch_data:

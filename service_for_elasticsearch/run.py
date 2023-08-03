@@ -5,7 +5,7 @@ import requests
 
 def is_elasticsearch_available():
     url = os.environ['ELASTICSEARCH_URL']
-    max_retries = 30  # Number of retries to check Elasticsearch availability
+    max_retries = 60  # Number of retries to check Elasticsearch availability
     retry_interval = 4  # Seconds to wait between retries
 
     for attempt in range(max_retries):
