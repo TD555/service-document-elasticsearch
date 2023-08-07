@@ -1,5 +1,5 @@
 from flask import Flask, jsonify, request, json, abort, render_template
-from elasticsearch import Elasticsearch, ConnectionTimeout, BadRequestError, exceptions
+from elasticsearch import Elasticsearch, ConnectionError , BadRequestError, exceptions
 import asyncio
 from datetime import datetime
 import requests
@@ -407,10 +407,10 @@ def get_page():
             result = es.search(index="my_index", body=query1, scroll=scroll_timeout, size=scroll_size)
             # print(result)
 
-        except ConnectionTimeout: abort(504, "Elasticsearch : Connection Timeout error")
+        except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
         
         except:
-            abort(504, "Elasticsearch :Search Timeout error")
+            abort(504, "Elasticsearch : Search Timeout error")
         
         hits = result["hits"]["hits"]
         # print(hits)
@@ -435,7 +435,7 @@ def get_page():
         try:
             result = es.search(index="my_index", body=query2, scroll=scroll_timeout, size=scroll_size)
 
-        except ConnectionTimeout: abort(504, "Elasticsearch : Connection Timeout error")
+        except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
         except:
             abort(504, "Elasticsearch : Search Timeout error")
@@ -446,7 +446,7 @@ def get_page():
             try:
                 query2['query']['bool']['must'][0]['span_near']['in_order'] = 'false'
                 result = es.search(index="my_index", body=query2, scroll=scroll_timeout, size=scroll_size)
-            except ConnectionTimeout: abort(504, "Elasticsearch : Connection Timeout error")
+            except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
             except:
                 abort(504, "Elasticsearch : Search Timeout error")
@@ -463,7 +463,7 @@ def get_page():
                     result = es.search(index="my_index", body=query1, scroll=scroll_timeout, size=scroll_size)
                     hits = result["hits"]["hits"]
                     print(hits)
-                except ConnectionTimeout: abort(504, "Elasticsearch : Connection Timeout error")
+                except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
                 except:
                     abort(504, "Elasticsearch : Search Timeout error")
 
