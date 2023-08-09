@@ -4,12 +4,12 @@ import asyncio
 from datetime import datetime
 import requests
 from collections import defaultdict
-from docx2pdf import convert
 import tempfile
 import uuid
 import traceback
 import math
 import time
+
 from pdfminer.converter import TextConverter
 from pdfminer.pdfinterp import PDFPageInterpreter
 from pdfminer.pdfinterp import PDFResourceManager
@@ -17,6 +17,7 @@ from pdfminer.pdfpage import PDFPage
 import os
 import re
 import io
+
 from version import __version__, __description__
 
 app = Flask(__name__)
@@ -28,7 +29,7 @@ app = Flask(__name__)
 INDEX = 'my_index'
 
 es_host = os.environ['ELASTICSEARCH_URL']
-# es_host = "http://localhost:9200/"
+# es_host = "http://localhost:9201/"
 es = Elasticsearch([es_host]) 
 
 request_timeout = 20
@@ -120,34 +121,38 @@ async def extract_text_from_pdf(pdf_file):
     output_stream.close()
     
     return all_texts
-    
+
+
+import subprocess
 
 async def extract_text_from_doc(doc_file):
 
     doc_file.seek(0)
-    
+
     document_content = io.BytesIO(doc_file.read())
-    temp_file = tempfile.NamedTemporaryFile(suffix='.docx', delete=False)
+    temp_file = tempfile.NamedTemporaryFile(suffix='.docx')
     temp_file.write(document_content.getvalue())
-    temp_file.close()
     document_path = temp_file.name
-   
 
     generated_id = str(uuid.uuid1())
-
     out_file = os.path.abspath(f'{generated_id}.pdf')
+    
+    try:
+        # Convert .doc to .pdf using unoconv
+        subprocess.run(["unoconv", "-f", "pdf", "--output", out_file, document_path])
 
-    convert(document_path, out_file)
-    
-    
-    with open(f'{generated_id}.pdf', 'rb') as pdf_file:
+    except subprocess.CalledProcessError as e:
+        return{"message" : e.stderr}
+        
+
+    with open(out_file, 'rb') as pdf_file:
         all_texts = await extract_text_from_pdf(pdf_file)
-    
-    os.remove(f'{generated_id}.pdf')
-    os.remove(document_path)
 
-    return all_texts
+    os.remove(out_file)
+    temp_file.close()
     
+    return all_texts
+
 
 @app.errorhandler(Exception)
 def handle_error(error):
@@ -158,7 +163,8 @@ def handle_error(error):
     else:
         status_code = 500
     print(error_traceback)
-    return {"message": error.description, "status" : status_code}
+    
+    return {"message": error.description, "status" : status_code}, status_code
     
     
 @app.after_request
@@ -265,13 +271,13 @@ async def upload_document(data):
     try: 
         if not file:
             raise Exception
-        if filename.endswith('.pdf'):
-            texts = await asyncio.wait_for(extract_text_from_pdf(pdf_file=file), upload_timeout - request_time)
-         
-        else: texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
-        
-        print(texts)
-    
+            
+        if filename.endswith('.pdf'): texts = await asyncio.wait_for(extract_text_from_pdf(pdf_file=file), upload_timeout - request_time)
+
+        elif filename.endswith('.docx') or filename.endswith('.doc'): texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
+
+        else: abort(422, "Invalid type of document")
+            
     except asyncio.TimeoutError:
         abort(408, "Document reading timeout")
     except Exception:
@@ -314,12 +320,17 @@ async def upload_document(data):
 @app.route("/search", methods=["POST"])
 def get_page():
 
-    keyword = request.json['search']
-    page = request.json['page']
-    project_id = request.json['project_id']
-    list_type_id = request.json['list_type_id']
-    limit = request.json['limit']
-    
+    try:
+        keyword = request.json['search']
+        page = request.json['page']
+        project_id = request.json['project_id']
+        list_type_id = request.json['list_type_id']
+        limit = request.json['limit']
+        sortOrder = request.json['sortOrder']
+        sortField = request.json['sortField']
+        
+    except: abort(403, "Invalid form-data")
+     
     scroll_size = limit  # Number of documents to retrieve in each scroll request
     scroll_timeout = "1m"  # Time interval to keep the search context alive
     special_characters = ['\\', '+', '-', '=', '&&', '||', '>', '<', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', "/"]
@@ -372,7 +383,7 @@ def get_page():
                     "fragmenter": "span"}
             }
         },
-        "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "color", "default_image"]
+        "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "color", "default_image", "created"]
     }
     
     query2 = {
@@ -399,7 +410,7 @@ def get_page():
                         },
                     }
                 },
-                "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "color", "default_image"]
+                "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "color", "default_image", "created"]
             }
     
     if not re.match(r'.*[ +].*', keyword.strip()):
@@ -490,6 +501,7 @@ def get_page():
                     sentences[hit["_source"]["path"]]["page"] = hit["_source"]["page"]
                     sentences[hit["_source"]["path"]]["default_image"] = hit["_source"]["default_image"]
                     sentences[hit["_source"]["path"]]["color"] = hit["_source"]["color"]
+                    sentences[hit["_source"]["path"]]["created"] = hit["_source"]["created"]
                     sentences[hit["_source"]["path"]]["match_content"] =  hit['highlight'].get('page_content', [''])[0]
                     
                 for content in hit['highlight'].get('page_content', []):
@@ -506,7 +518,6 @@ def get_page():
 
 
     rows = []
-    
     for url, item in sentences.items():
         new_dict = defaultdict()
         item['path'] = url
@@ -515,9 +526,10 @@ def get_page():
         for key in keys:
             new_dict[key] = item[key]
             del item[key]
-
+        print(dict(item))
         
         if new_dict['node_id'] not in [row['node_id'] for row in rows]: 
+            new_dict['updated'] = item['created']
             new_dict['data'] = [item]
             rows.append(new_dict)
             
@@ -525,7 +537,19 @@ def get_page():
             for i, data in enumerate(rows):
                 if data['node_id'] == new_dict['node_id']:
                     break 
+            updated = max(item['created'], rows[i]['updated'])
+            rows[i]['updated'] = updated
             rows[i]['data'].append(item)
+        
+    if sortOrder == 'DESC' and sortField == 'title':
+        rows.sort(key=lambda x: x['type_name'], reverse=True)
+    elif sortOrder == 'DESC' and sortField == 'updated_at':
+        rows.sort(key=lambda x: x['updated'], reverse=True)
+    elif sortOrder == 'ASC' and sortField == 'title':
+        rows.sort(key=lambda x: x['type_name'])
+    elif sortOrder == 'ASC' and sortField == 'updated_at':
+        rows.sort(key=lambda x: x['updated'])
+    else: abort(403, 'Invalid sortOrder and/or sortField value')
             
     return jsonify({'rows' : rows[limit * (page-1) : limit * page], 'count' : math.ceil(len(rows) / limit), 'status' : 200})
     
@@ -546,7 +570,7 @@ async def get_list():
     # Iterate through the results and extract the fields from each document
     documents = []
     for hit in results["hits"]["hits"]:
-        document = {"name": hit["_source"]["filename"], "doc_id": hit["_source"]["doc_id"], "type_id" : hit["_source"]["type_id"], "page" : hit["_source"]["page"],\
+        document = {"filename": hit["_source"]["filename"], "doc_id": hit["_source"]["doc_id"], "type_id" : hit["_source"]["type_id"], "page" : hit["_source"]["page"],\
                     "created": hit["_source"]["created"], "project_id" : hit["_source"]["project_id"], "node_id" : hit["_source"]["node_id"], "path" : hit["_source"]["path"]}
         documents.append(document)
         
@@ -569,18 +593,20 @@ async def update():
     if request.form['old_path'] == request.form['path']:
         abort(400, "Old and new files are duplicated.")
     
-    data_dict['path'] = request.form["path"]
-    data_dict['project_id'] = request.form['project_id']
-    data_dict['user_id'] = request.form['user_id']
-    data_dict['node_id'] = request.form['node_id']
-    data_dict['type_id'] = request.form['type_id']
-    data_dict['property_id'] = request.form['property_id']
-    data_dict['node_name'] = request.form['node_name']
-    data_dict['type_name'] = request.form['type']
-    data_dict['property_name'] = request.form['property']
-    data_dict['color'] = request.form['type']
-    data_dict['default_image'] = request.form['default_image']
+    try:
+        data_dict['path'] = request.form["path"]
+        data_dict['project_id'] = request.form['project_id']
+        data_dict['user_id'] = request.form['user_id']
+        data_dict['node_id'] = request.form['node_id']
+        data_dict['type_id'] = request.form['type_id']
+        data_dict['property_id'] = request.form['property_id']
+        data_dict['node_name'] = request.form['node_name']
+        data_dict['type_name'] = request.form['type']
+        data_dict['property_name'] = request.form['property']
+        data_dict['color'] = request.form['type']
+        data_dict['default_image'] = request.form['default_image']
     
+    except: abort(403, "Invalid form-data")
     
     delete_response = await delete(old_id)
     

@@ -1,5 +1,13 @@
 FROM python:3.8.10
 
+RUN apt-get update && \
+    apt-get install -y unoconv libreoffice --no-install-recommends && \
+    rm -rf /var/lib/apt/lists/*
+
+RUN cp /usr/bin/unoconv /usr/local/bin/unoconv
+
+RUN sed -i 's|#!/usr/bin/env python3|#!/usr/bin/python3|' /usr/local/bin/unoconv
+
 RUN adduser --disabled-login service-elasticsearch
 USER service-elasticsearch
 
