@@ -13,7 +13,7 @@ services:
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
 
-  flask_app:
+  flask_elastic_app:
     build: ./service_for_elasticsearch
     depends_on:
       - elasticsearch
