@@ -565,7 +565,9 @@ async def get_list():
     query = {"size": 10000, "query": {"match_all": {}}}
 
     # Use the search API to retrieve the documents and extract the fields
-    results = es.search(index=INDEX, body=query, _source=fields)
+    try:
+        results = es.search(index=INDEX, body=query, _source=fields)
+    except Exception as e: abort(500, str(e))
 
     # Iterate through the results and extract the fields from each document
     documents = []
