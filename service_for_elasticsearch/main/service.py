@@ -562,7 +562,7 @@ async def get_list():
     fields = ["doc_id", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "filename", "created", "path"]
 
     # Define the search query to retrieve all documents
-    query = {"size": 10000, "query": {"match_all": {}}}
+    query = {"query": {"match_all": {}}}
 
     # Use the search API to retrieve the documents and extract the fields
     try:
