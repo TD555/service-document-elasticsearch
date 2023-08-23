@@ -158,13 +158,12 @@ async def extract_text_from_doc(doc_file):
 def handle_error(error):
     # Get the traceback
     error_traceback = traceback.format_exc()
+    print(error_traceback)
     if hasattr(error, 'code'):
         status_code = error.code
     else:
         status_code = 500
-    print(error_traceback)
-    
-    return {"message": error.description, "status" : status_code}, status_code
+    return {"message" : str(error), "status_code" : status_code}, status_code
     
     
 @app.after_request
@@ -562,31 +561,23 @@ async def get_list():
     fields = ["doc_id", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "filename", "created", "path"]
 
     # Define the search query to retrieve all documents
-    query = {"query": {"match_all": {}}, "size": 10000}
+    query = {"query": {"match_all": {}}}
 
+    # Use the search API to retrieve the documents and extract the fields
     try:
         results = es.search(index=INDEX, body=query, _source=fields)
-    except es_exceptions.BadRequestError as e:
-        error_message = "Bad request: " + str(e)
-        return jsonify({"message": error_message, "status": 400}), 400
-    except es_exceptions.ConnectionError as e:
-        error_message = "Elasticsearch connection error: " + str(e)
-        return jsonify({"message": error_message, "status": 500}), 500
-    except Exception as e:
-        error_message = "An error occurred: " + str(e)
-        return jsonify({"message": error_message, "status": 500}), 500
+    except Exception as e: abort(500, str(e))
 
+    # Iterate through the results and extract the fields from each document
     documents = []
     for hit in results["hits"]["hits"]:
-        document = {
-            "filename": hit["_source"]["filename"],
-            "doc_id": hit["_source"]["doc_id"],
-            "type_id": hit["_source"]["type_id"],
-            # Include other fields you want to extract
-        }
+        document = {"filename": hit["_source"]["filename"], "doc_id": hit["_source"]["doc_id"], "type_id" : hit["_source"]["type_id"], "page" : hit["_source"]["page"],\
+                    "created": hit["_source"]["created"], "project_id" : hit["_source"]["project_id"], "node_id" : hit["_source"]["node_id"], "path" : hit["_source"]["path"]}
         documents.append(document)
-
-    return jsonify({"docs": documents, "status": 200})
+        
+    # Print the list of documents
+    
+    return jsonify({'docs' : documents, 'status' : 200})
     
 
 @app.route("/update", methods=["PUT"])
