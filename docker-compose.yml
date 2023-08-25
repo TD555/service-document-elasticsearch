@@ -23,6 +23,6 @@ services:
     environment:
       PYTHONUNBUFFERED: 0
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
-
+    restart: always
 volumes:
   elasticsearch_data:

@@ -84,6 +84,18 @@ async def get_filestorage_object(url):
         # Handle error cases
         return None
 
+def remove_duplicates(input_list):
+    seen = set()
+    unique_list = []
+    
+    for item in input_list:
+        frozen_item = frozenset(item.items())
+        
+        if frozen_item not in seen:
+            seen.add(frozen_item)
+            unique_list.append(item)
+    
+    return unique_list
 
 def get_context(output_stream, interpreter, all_texts, all_pages):
     for page in all_pages:
@@ -179,32 +191,54 @@ def info():
     return __description__
 
 
-@app.route("/create", methods=["POST"])
-async def create():
+@app.route("/create_or_update", methods=["POST"])
+async def create_or_update():
 
 #   ---Get file and parse content---
 
     data_dict = {}
     
     try:
-        data_dict['path'] = request.form['path']
-        data_dict['project_id'] = request.form['project_id']
-        data_dict['user_id'] = request.form['user_id']
-        data_dict['node_id'] = request.form['node_id']
-        data_dict['node_name'] = request.form['node_name']
-        data_dict['type_id'] = request.form['type_id']
-        data_dict['property_id'] = request.form['property_id']
-        data_dict['type_name'] = request.form['type']
-        data_dict['property_name'] = request.form['property']
-        data_dict['color'] = request.form['color']
-        data_dict['default_image'] = request.form['default_image']
+        nodes_data = request.json['nodes_data']
+        data_dict['project_id'] = request.json['project_id']
+        data_dict['user_id'] = request.json['user_id']
+        data_dict['node_id'] = request.json['node_id']
+        data_dict['node_name'] = request.json['node_name']
+        data_dict['type_id'] = request.json['type_id']
+        data_dict['property_id'] = request.json['property_id']
+        data_dict['type_name'] = request.json['type']
+        data_dict['property_name'] = request.json['property']
+        data_dict['color'] = request.json['color']
+        data_dict['default_image'] = request.json['default_image']
+        
     except:
         abort(403, "Invalid form-data")
+    
+    all_docs = await get_list()
+    filenames = list(set([item['path'] for item in all_docs.json['docs'] if item['node_id'] == data_dict['node_id']]))
+    
+    print("All filenames in the start", filenames)   
+    data_dict['filenames'] = filenames
+    
+    returned_jsons = []
+    for item in remove_duplicates(nodes_data):
+        result = {**data_dict, **item}      
+        returned_jsons.append(upload_document(result))
+    
+    print(returned_jsons)
+    returned_jsons = await asyncio.gather(*returned_jsons)
+    
+    print("All filenames in the end", filenames)   
+       
+    my_namespace = uuid.NAMESPACE_DNS
+
+    for filename in filenames:
+        my_uuid = uuid.uuid5(my_namespace, filename) 
+        old_id = str(my_uuid)
+        delete_response = await delete(old_id, filename)
+        returned_jsons.append(delete_response)      
         
-    returned_json = await upload_document(data_dict)
-    if returned_json['status'] == 403:
-        abort(403, returned_json['message'])
-    return jsonify(returned_json)
+    return jsonify({"messages" : returned_jsons, "status" : 200})
     
     
 async def upload_document(data):    
@@ -212,7 +246,11 @@ async def upload_document(data):
     # text = parsed["content"]
     # content = text.strip()
 
-    path = data['path']
+    try:
+        name= data['name']
+        path = data['url']
+    except: abort(403, "Invalid key names in nodes_data")
+    
     try:
         start = time.time()
         file = await asyncio.wait_for(get_filestorage_object(path), timeout=request_timeout)
@@ -232,18 +270,19 @@ async def upload_document(data):
     property_name = data['property_name']
     color = data['color']
     default_image = data['default_image']
+    filenames = data['filenames']
     
     my_namespace = uuid.NAMESPACE_DNS  
 
     my_uuid = uuid.uuid5(my_namespace, path)
     
-    items = (await get_list()).json['docs']
-    
     filename = os.path.basename(path)
 
-    for item in items:
-        if (item['doc_id'] == str(my_uuid)):
-            return {'message' : f"Document already exists in database.",  "name" : filename, 'status' : 403}
+    print('filename : ',  filenames, filename)
+    
+    if path in filenames:
+        filenames.remove(path)
+        return {'message' : f"Document already exists in database.",  "URL" : path}
         
 
 #         main_prompt = f"""Get neo4j schema with relationships from current text - '{content}' """
@@ -280,7 +319,7 @@ async def upload_document(data):
     except asyncio.TimeoutError:
         abort(408, "Document reading timeout")
     except Exception:
-        abort(500, 'Failed to read document.')   
+        abort(500, f'Failed to read document {path}')   
         
     finally:
         if file:
@@ -302,7 +341,7 @@ async def upload_document(data):
             "property_name" : property_name,
             "color" : color,
             "default_image" : default_image,
-            "filename" : filename,
+            "filename" : name,
             "page" : page_num + 1,
             "page_content": page_content,
             "created": str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
@@ -312,7 +351,7 @@ async def upload_document(data):
         es.index(index=INDEX, id = str(my_uuid) + str(page_num), document=req)
         
     
-    return {'message' : f"Document was created in database", "doc_id" : str(my_uuid), "name" : filename, "created" : datetime.now().strftime("%Y-%m-%d %H:%M:%S"), 'status' : 200}
+    return {'message' : f"Document was created in database", "URL" : path}
     
     
 
@@ -329,7 +368,10 @@ def get_page():
         sortField = request.json['sortField']
         
     except: abort(403, "Invalid form-data")
-     
+    
+    if len(keyword.strip()) < 3:
+        abort(422, "Search terms must contain at least 3 characters")
+    
     scroll_size = limit  # Number of documents to retrieve in each scroll request
     scroll_timeout = "1m"  # Time interval to keep the search context alive
     special_characters = ['\\', '+', '-', '=', '&&', '||', '>', '<', '!', '(', ')', '{', '}', '[', ']', '^', '"', '~', '*', '?', ':', "/"]
@@ -540,11 +582,11 @@ def get_page():
             rows[i]['updated'] = updated
             rows[i]['data'].append(item)
         
-    if sortOrder == 'DESC' and sortField == 'title':
+    if sortOrder == 'DESC' and sortField == 'name':
         rows.sort(key=lambda x: x['type_name'], reverse=True)
     elif sortOrder == 'DESC' and sortField == 'updated_at':
         rows.sort(key=lambda x: x['updated'], reverse=True)
-    elif sortOrder == 'ASC' and sortField == 'title':
+    elif sortOrder == 'ASC' and sortField == 'name':
         rows.sort(key=lambda x: x['type_name'])
     elif sortOrder == 'ASC' and sortField == 'updated_at':
         rows.sort(key=lambda x: x['updated'])
@@ -557,78 +599,45 @@ def get_page():
 @app.route("/get_list", methods=["GET"])
 async def get_list():
 
-    # Define the fields you want to retrieve
-    fields = ["doc_id", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "filename", "created", "path"]
+    query = {"query": {"match_all": {}}, "size": 1}
 
-    # Define the search query to retrieve all documents
-    query = {"query": {"match_all": {}}}
+    # Use the initial search API to retrieve the first batch of documents and the scroll ID
+    initial_search = es.search(index=INDEX, body=query, scroll='5m')
+    scroll_id = initial_search['_scroll_id']
+    total_results = initial_search['hits']['total']['value']
 
-    # Use the search API to retrieve the documents and extract the fields
-    try:
-        results = es.search(index=INDEX, body=query, _source=fields)
-    except Exception as e: abort(500, str(e))
-
-    # Iterate through the results and extract the fields from each document
+    # Iterate through the batches of results using the Scroll API
     documents = []
-    for hit in results["hits"]["hits"]:
-        document = {"filename": hit["_source"]["filename"], "doc_id": hit["_source"]["doc_id"], "type_id" : hit["_source"]["type_id"], "page" : hit["_source"]["page"],\
-                    "created": hit["_source"]["created"], "project_id" : hit["_source"]["project_id"], "node_id" : hit["_source"]["node_id"], "path" : hit["_source"]["path"]}
-        documents.append(document)
-        
-    # Print the list of documents
+    while total_results > 0:
+        for hit in initial_search['hits']['hits']:
+            document = {
+                "filename": hit["_source"]["filename"],
+                "doc_id": hit["_source"]["doc_id"],
+                "type_id": hit["_source"]["type_id"],
+                "page": hit["_source"]["page"],
+                "created": hit["_source"]["created"],
+                "project_id": hit["_source"]["project_id"],
+                "node_id": hit["_source"]["node_id"],
+                "path": hit["_source"]["path"]
+            }
+            documents.append(document)
+
+        # Perform the next scroll request
+        initial_search = es.scroll(scroll_id=scroll_id, scroll='1s')
+        scroll_id = initial_search['_scroll_id']
+        total_results -= len(initial_search['hits']['hits'])
+        if len(initial_search['hits']['hits']) == 0:
+            break
+
+    # Clear the scroll context when done
+    es.clear_scroll(scroll_id=scroll_id)
+        # Print the list of documents
     
     return jsonify({'docs' : documents, 'status' : 200})
     
-
-@app.route("/update", methods=["PUT"])
-async def update():
-
-    my_namespace = uuid.NAMESPACE_DNS
-    my_uuid = uuid.uuid5(my_namespace, request.form["old_path"])
-    
-    old_id = str(my_uuid)
-    
-    data_dict = {}
-    
-    
-    if request.form['old_path'] == request.form['path']:
-        abort(400, "Old and new files are duplicated.")
-    
-    try:
-        data_dict['path'] = request.form["path"]
-        data_dict['project_id'] = request.form['project_id']
-        data_dict['user_id'] = request.form['user_id']
-        data_dict['node_id'] = request.form['node_id']
-        data_dict['type_id'] = request.form['type_id']
-        data_dict['property_id'] = request.form['property_id']
-        data_dict['node_name'] = request.form['node_name']
-        data_dict['type_name'] = request.form['type']
-        data_dict['property_name'] = request.form['property']
-        data_dict['color'] = request.form['type']
-        data_dict['default_image'] = request.form['default_image']
-    
-    except: abort(403, "Invalid form-data")
-    
-    delete_response = await delete(old_id)
-    
-    await asyncio.sleep(0.5)
-    
-    upload_response = await upload_document(data_dict)
-    
-    returned_dict = {"delete_message" : delete_response["message"], "upload_message" : upload_response["message"]}
-    
-    if not delete_response['status'] == 200 and not upload_response['status'] == 200:
-        returned_dict['status'] = 400
-        return returned_dict
-    else:
-        returned_dict["status"] = 200
-    
-    return jsonify(returned_dict)
-
-    
     
 @app.route("/delete/<string:document_id>", methods=["DELETE"])
-async def delete(document_id):
+async def delete(document_id, path):
     
     query = {
         "query": {
@@ -642,8 +651,8 @@ async def delete(document_id):
     response = es.delete_by_query(index=INDEX, body=query)
     print(response)
     if response['deleted']:
-        return {'message' : f"Document was deleted from database.", 'status' : 200}
-    else: return {'message' : f"Document doesn't exist in database.", 'status' : 400}
+        return {'message' : f"Document was deleted from database.", 'URL' : path}
+    else: abort(400, f"Document {path} doesn't exist in database.")
     
     
 @app.route("/clean", methods=["DELETE"])    
