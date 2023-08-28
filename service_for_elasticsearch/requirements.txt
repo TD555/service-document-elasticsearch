@@ -1,0 +1,7 @@
+uno==0.3.3
+waitress==2.1.2
+flask[async]==2.2.3
+Flask-Caching==2.0.2
+requests==2.31.0
+elasticsearch==8.6.2
+pdfminer==20191125
