@@ -452,6 +452,7 @@ def get_page():
                     }
                 },
                 "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "filename", "color", "default_image", "created"]
+
             }
     
     if not re.match(r'.*[ +].*', keyword.strip()):
