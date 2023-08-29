@@ -105,6 +105,7 @@ def get_context(output_stream, interpreter, all_texts, all_pages):
         text = output_stream.getvalue()
 
         # do something with the text for this page
+        text = text.replace("\n", " ")
         all_texts.append(text)
 
         # reset the output stream
