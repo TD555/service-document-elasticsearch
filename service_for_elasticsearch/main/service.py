@@ -195,7 +195,6 @@ def info():
 async def create_or_update():
 
 #   ---Get file and parse content---
-
     data_dict = {}
     
     try:
@@ -233,11 +232,12 @@ async def create_or_update():
     my_namespace = uuid.NAMESPACE_DNS
 
     for filename in filenames:
-        my_uuid = uuid.uuid5(my_namespace, filename) 
+        my_uuid = uuid.uuid5(my_namespace, filename + data_dict['node_id']) 
         old_id = str(my_uuid)
         delete_response = await delete(old_id, filename)
         returned_jsons.append(delete_response)      
-        
+    
+    print((await get_list()).json['docs'])
     return jsonify({"messages" : returned_jsons, "status" : 200})
     
     
@@ -274,7 +274,7 @@ async def upload_document(data):
     
     my_namespace = uuid.NAMESPACE_DNS  
 
-    my_uuid = uuid.uuid5(my_namespace, path)
+    my_uuid = uuid.uuid5(my_namespace, path + node_id)
     
     filename = os.path.basename(path)
 
@@ -523,7 +523,7 @@ def get_page():
                     
                     result = es.search(index="my_index", body=query1, scroll=scroll_timeout, size=scroll_size)
                     hits = result["hits"]["hits"]
-                    print(hits)
+                    # print(hits)
                 except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
                 except:
                     abort(504, "Elasticsearch : Search Timeout error")
@@ -533,32 +533,32 @@ def get_page():
     while hits:
         # Scroll to the next batch of results
         for hit in hits:
-            print(hit['highlight'].get('page_content'))
+            # print(hit['highlight'].get('page_content'))
             if 'highlight' in hit.keys() and hit["_source"]["project_id"] == project_id and (hit["_source"]["type_id"] in list_type_id or not list_type_id):
                 # print(hit['_score'], hit['highlight'].get('page_content', ['']))
-                if hit["_source"]["path"] not in sentences.keys():
-                    sentences[hit["_source"]["path"]] = defaultdict(int)
-                    sentences[hit["_source"]["path"]]["match_count"] = 0
-                    sentences[hit["_source"]["path"]]["match_filename"] = hit['highlight'].get('filename', [''])[0]
-                    sentences[hit["_source"]["path"]]["node_id"] = hit["_source"]["node_id"]
-                    sentences[hit["_source"]["path"]]["project_id"] = hit["_source"]["project_id"]
-                    sentences[hit["_source"]["path"]]["user_id"] = hit["_source"]["user_id"]
-                    sentences[hit["_source"]["path"]]["type_id"] = hit["_source"]["type_id"]
-                    sentences[hit["_source"]["path"]]["node_id"] = hit["_source"]["node_id"]
-                    sentences[hit["_source"]["path"]]["property_id"] = hit["_source"]["property_id"]
-                    sentences[hit["_source"]["path"]]["type_name"] = hit["_source"]["type_name"]
-                    sentences[hit["_source"]["path"]]["node_name"] = hit["_source"]["node_name"]
-                    sentences[hit["_source"]["path"]]["property_name"] = hit["_source"]["property_name"]
-                    sentences[hit["_source"]["path"]]["filename"] = hit["_source"]["filename"]
-                    sentences[hit["_source"]["path"]]["default_image"] = hit["_source"]["default_image"]
-                    sentences[hit["_source"]["path"]]["color"] = hit["_source"]["color"]
-                    sentences[hit["_source"]["path"]]["created"] = hit["_source"]["created"]
-                if hit['highlight'].get('page_content', [''])[0] and "match_content" not in sentences[hit["_source"]["path"]]:
-                    sentences[hit["_source"]["path"]]["match_content"] =  hit['highlight'].get('page_content', [''])[0]
-                    sentences[hit["_source"]["path"]]["page"] = hit["_source"]["page"]
+                if (hit["_source"]["path"], hit["_source"]["node_id"]) not in sentences.keys():
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])] = defaultdict(int)
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_count"] = 0
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_filename"] = hit['highlight'].get('filename', [''])[0]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["node_id"] = hit["_source"]["node_id"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["project_id"] = hit["_source"]["project_id"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["user_id"] = hit["_source"]["user_id"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["type_id"] = hit["_source"]["type_id"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["node_id"] = hit["_source"]["node_id"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["property_id"] = hit["_source"]["property_id"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["type_name"] = hit["_source"]["type_name"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["node_name"] = hit["_source"]["node_name"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["property_name"] = hit["_source"]["property_name"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["filename"] = hit["_source"]["filename"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["default_image"] = hit["_source"]["default_image"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["color"] = hit["_source"]["color"]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["created"] = hit["_source"]["created"]
+                if hit['highlight'].get('page_content', [''])[0] and "match_content" not in sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]:
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_content"] =  hit['highlight'].get('page_content', [''])[0]
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["page"] = hit["_source"]["page"]
                 for content in hit['highlight'].get('page_content', []):
                     # print("content - ", content)
-                    sentences[hit["_source"]["path"]]["match_count"] += int(len(re.findall(r"<em>(.*?)</em>", content)))
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_count"] += int(len(re.findall(r"<em>(.*?)</em>", content)))
                     
                     
         scroll_id = result.get("_scroll_id")
@@ -571,6 +571,7 @@ def get_page():
 
 
     rows = []
+    print(sentences.keys())
     for url, item in sentences.items():
         new_dict = defaultdict()
         item['path'] = url
@@ -579,8 +580,7 @@ def get_page():
         for key in keys:
             new_dict[key] = item[key]
             del item[key]
-        print(dict(item))
-        
+        # print(dict(item))
         if new_dict['node_id'] not in [row['node_id'] for row in rows]: 
             new_dict['updated'] = item['created']
             new_dict['data'] = [item]
@@ -614,7 +614,7 @@ async def get_list():
     query = {"query": {"match_all": {}}, "size": 1}
 
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
-    initial_search = es.search(index=INDEX, body=query, scroll='5m')
+    initial_search = es.search(index=INDEX, body=query, scroll='1m')
     scroll_id = initial_search['_scroll_id']
     total_results = initial_search['hits']['total']['value']
 
