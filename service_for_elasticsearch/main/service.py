@@ -417,10 +417,11 @@ def get_page():
         "highlight": {
             "fields": {
                 "page_content": {
-                    "type": "plain",
-                    "fragmenter": "span"},
+                    "type": "unified",
+                    "fragmenter": "span",
+                    "order": "score"},
                 "filename" : {
-                    "type": "plain",
+                    "type": "unified",
                     "fragmenter": "span"}
             }
         },
@@ -445,12 +446,15 @@ def get_page():
                 "fields": {
                     "page_content": 
                         {   
-                            "type": "plain",
+                            "type": "unified",
                             "fragmenter": "span",
                             "order": "score" 
                         },
-                    }
-                },
+                    "filename" : {
+                            "type": "unified",
+                            "fragmenter": "span"}
+                            }
+                    },
                 "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "filename", "color", "default_image", "created"]
 
             }
@@ -525,6 +529,7 @@ def get_page():
     while hits:
         # Scroll to the next batch of results
         for hit in hits:
+            print(hit['highlight'].get('page_content'))
             if 'highlight' in hit.keys() and hit["_source"]["project_id"] == project_id and (hit["_source"]["type_id"] in list_type_id or not list_type_id):
                 # print(hit['_score'], hit['highlight'].get('page_content', ['']))
                 if hit["_source"]["path"] not in sentences.keys():
@@ -541,13 +546,14 @@ def get_page():
                     sentences[hit["_source"]["path"]]["node_name"] = hit["_source"]["node_name"]
                     sentences[hit["_source"]["path"]]["property_name"] = hit["_source"]["property_name"]
                     sentences[hit["_source"]["path"]]["filename"] = hit["_source"]["filename"]
-                    sentences[hit["_source"]["path"]]["page"] = hit["_source"]["page"]
                     sentences[hit["_source"]["path"]]["default_image"] = hit["_source"]["default_image"]
                     sentences[hit["_source"]["path"]]["color"] = hit["_source"]["color"]
                     sentences[hit["_source"]["path"]]["created"] = hit["_source"]["created"]
+                if hit['highlight'].get('page_content', [''])[0] and "match_content" not in sentences[hit["_source"]["path"]]:
                     sentences[hit["_source"]["path"]]["match_content"] =  hit['highlight'].get('page_content', [''])[0]
-                    
+                    sentences[hit["_source"]["path"]]["page"] = hit["_source"]["page"]
                 for content in hit['highlight'].get('page_content', []):
+                    # print("content - ", content)
                     sentences[hit["_source"]["path"]]["match_count"] += int(len(re.findall(r"<em>(.*?)</em>", content)))
                     
                     
