@@ -417,11 +417,13 @@ def get_page():
         "highlight": {
             "fields": {
                 "page_content": {
-                    "type": "unified",
+                    "type": "plain",
                     "fragmenter": "span",
+                    "number_of_fragments" : 1000,
                     "order": "score"},
                 "filename" : {
-                    "type": "unified",
+                    "type": "plain",
+                    "number_of_fragments" : 0,
                     "fragmenter": "span"}
             }
         },
@@ -446,12 +448,14 @@ def get_page():
                 "fields": {
                     "page_content": 
                         {   
-                            "type": "unified",
+                            "type": "plain",
                             "fragmenter": "span",
+                            "number_of_fragments" : 1000,
                             "order": "score" 
                         },
                     "filename" : {
-                            "type": "unified",
+                            "type": "plain",
+                            "number_of_fragments" : 0,
                             "fragmenter": "span"}
                             }
                     },
