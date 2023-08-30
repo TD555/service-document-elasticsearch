@@ -15,6 +15,9 @@ WORKDIR  /var/www/service_elasticsearch/service-for-elasticsearch
 COPY --chown=service-elasticsearch:service-elasticsearch .   /var/www/service_elasticsearch/service-for-elasticsearch 
 
 COPY --chown=service-elasticsearch:service-elasticsearch ./requirements.txt  /var/www/service_elasticsearch/service-for-elasticsearch/requirements.txt
+
+ENV PATH="$PATH:/home/service-elasticsearch/.local/bin"
+
 RUN python3 -m pip install --no-cache-dir  -r requirements.txt
 
 CMD ["python3", "run.py"]

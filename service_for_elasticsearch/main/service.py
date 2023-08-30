@@ -9,6 +9,7 @@ import uuid
 import traceback
 import math
 import time
+import pytz
 
 from pdfminer.converter import TextConverter
 from pdfminer.pdfinterp import PDFPageInterpreter
@@ -34,6 +35,9 @@ es = Elasticsearch([es_host])
 
 request_timeout = 20
 upload_timeout = 40
+
+gmt_plus_4 = pytz.timezone('Asia/Dubai')
+
 
 put_data = {
   "settings": {
@@ -281,6 +285,11 @@ async def upload_document(data):
 
     print('filename : ',  filenames, filename)
     
+    current_utc_time = datetime.utcnow()
+    gmt_plus_4_time = current_utc_time.replace(tzinfo=pytz.utc).astimezone(gmt_plus_4)
+
+    gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
+    
     if path in filenames:
         filenames.remove(path)
         return {'message' : f"Document already exists in database.",  "URL" : path}
@@ -309,26 +318,95 @@ async def upload_document(data):
 
     try: 
         if not file:
+            req = {
+            "doc_id" : str(my_uuid),
+            "path" : path,
+            "project_id" : project_id,
+            "user_id" : user_id,
+            "node_id" : node_id,
+            "type_id" : type_id,
+            "property_id" : property_id,
+            "node_name" : node_name,
+            "type_name" : type_name,
+            "property_name" : property_name,
+            "color" : color,
+            "default_image" : default_image,
+            "filename" : name,
+            "page" : 0,
+            "page_content": "",
+            "created": str(gmt_plus_4_time_str),
+            }
+            
+
+            es.index(index=INDEX, id = str(my_uuid), document=req)
             raise Exception
             
         if filename.endswith('.pdf'): texts = await asyncio.wait_for(extract_text_from_pdf(pdf_file=file), upload_timeout - request_time)
 
-        elif filename.endswith('.docx') or filename.endswith('.doc'): texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
+        elif filename.endswith('.docx') or filename.endswith('.doc') or filename.endswith('.msword') or filename.endswith('.document'): texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
 
         else: return {'message' : f"Invalid type of document", "URL" : path}
             
     except asyncio.TimeoutError:
+        req = {
+            "doc_id" : str(my_uuid),
+            "path" : path,
+            "project_id" : project_id,
+            "user_id" : user_id,
+            "node_id" : node_id,
+            "type_id" : type_id,
+            "property_id" : property_id,
+            "node_name" : node_name,
+            "type_name" : type_name,
+            "property_name" : property_name,
+            "color" : color,
+            "default_image" : default_image,
+            "filename" : name,
+            "page" : 0,
+            "page_content": "",
+            "created": str(gmt_plus_4_time_str),
+        }
+        
+
+        es.index(index=INDEX, id = str(my_uuid), document=req)
+        
         return {'message' : f"Document reading timeout", "URL" : path}
     
     except Exception:
-        return {'message' : f"Failed to read document", "URL" : path}
+        req = {
+            "doc_id" : str(my_uuid),
+            "path" : path,
+            "project_id" : project_id,
+            "user_id" : user_id,
+            "node_id" : node_id,
+            "type_id" : type_id,
+            "property_id" : property_id,
+            "node_name" : node_name,
+            "type_name" : type_name,
+            "property_name" : property_name,
+            "color" : color,
+            "default_image" : default_image,
+            "filename" : name,
+            "page" : 0,
+            "page_content": "",
+            "created": str(gmt_plus_4_time_str),
+        }
+        
+
+        es.index(index=INDEX, id = str(my_uuid), document=req)
+        return {'message' : "Failed to read document", "URL" : path}
         
     finally:
         if file:
             file.close()
     
     for page_num, page_content in enumerate(texts):
+        
+        current_utc_time = datetime.utcnow()
+        gmt_plus_4_time = current_utc_time.replace(tzinfo=pytz.utc).astimezone(gmt_plus_4)
 
+        gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
+        
         # Print the page number and text content to the console
         req = {
             "doc_id" : str(my_uuid),
@@ -346,7 +424,7 @@ async def upload_document(data):
             "filename" : name,
             "page" : page_num + 1,
             "page_content": page_content,
-            "created": str(datetime.now().strftime("%Y-%m-%d %H:%M:%S")),
+            "created": str(gmt_plus_4_time_str),
         }
         
 
