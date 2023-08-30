@@ -250,7 +250,7 @@ async def upload_document(data):
     try:
         name= data['name']
         path = data['url']
-    except: abort(403, "Invalid key names in nodes_data")
+    except: return {'message' : f"Invalid key names in nodes_data",  "URL" : path}
     
     try:
         start = time.time()
@@ -259,7 +259,7 @@ async def upload_document(data):
         request_time = end - start
         
     except Exception: 
-        abort(408, 'Document reading timeout.')
+        return {'message' : f"Document reading timeout",  "URL" : path}
         
     project_id = data['project_id']
     user_id = data['user_id']
@@ -315,12 +315,13 @@ async def upload_document(data):
 
         elif filename.endswith('.docx') or filename.endswith('.doc'): texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
 
-        else: abort(422, "Invalid type of document")
+        else: return {'message' : f"Invalid type of document", "URL" : path}
             
     except asyncio.TimeoutError:
-        abort(408, "Document reading timeout")
+        return {'message' : f"Document reading timeout", "URL" : path}
+    
     except Exception:
-        abort(500, f'Failed to read document {path}')   
+        return {'message' : f"Failed to read document", "URL" : path}
         
     finally:
         if file:
