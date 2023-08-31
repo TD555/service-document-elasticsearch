@@ -151,21 +151,17 @@ async def extract_text_from_doc(doc_file):
     temp_file.write(document_content.getvalue())
     document_path = temp_file.name
 
-    generated_id = str(uuid.uuid1())
-    out_file = os.path.abspath(f'{generated_id}.pdf')
-    
+
     try:
-        # Convert .doc to .pdf using unoconv
-        subprocess.run(["unoconv", "-f", "pdf", "--output", out_file, document_path])
+        pdf_bytes = subprocess.check_output(["unoconv", "-f", "pdf", "--stdout", document_path])
 
     except subprocess.CalledProcessError as e:
-        return{"message" : e.stderr}
-        
+        return {"message": e.stderr}
 
-    with open(out_file, 'rb') as pdf_file:
-        all_texts = await extract_text_from_pdf(pdf_file)
+    # Create a BytesIO object from the PDF content
+    pdf_stream = io.BytesIO(pdf_bytes)
 
-    os.remove(out_file)
+    all_texts = await extract_text_from_pdf(pdf_stream)
     temp_file.close()
     
     return all_texts
