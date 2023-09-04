@@ -19,7 +19,7 @@ import os
 import re
 import io
 
-# from version import __version__, __description__
+from version import __version__, __description__
 
 app = Flask(__name__)
 
@@ -29,8 +29,8 @@ app = Flask(__name__)
 # URL = "http://192.168.0.176:5000"
 INDEX = 'my_index'
 
-# es_host = os.environ['ELASTICSEARCH_URL']
-es_host = "http://localhost:9201/"
+es_host = os.environ['ELASTICSEARCH_URL']
+# es_host = "http://localhost:9201/"
 es = Elasticsearch([es_host]) 
 
 request_timeout = 20
@@ -189,7 +189,7 @@ def after_request(response):
 
 @app.route("/", methods=["GET"])
 def info():
-    return "__description__"
+    return __description__
 
 
 @app.route("/create_or_update", methods=["POST"])
