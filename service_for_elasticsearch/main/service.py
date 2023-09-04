@@ -212,7 +212,7 @@ async def create_or_update():
         data_dict['default_image'] = request.json['default_image']
         
     except:
-        abort(403, "Invalid form-data")
+        abort(403, "Invalid raw data")
     
     all_docs = await get_list()
     filenames = list(set([item['path'] for item in all_docs.json['docs'] if item['node_id'] == data_dict['node_id']]))
@@ -250,7 +250,7 @@ async def upload_document(data):
     try:
         name= data['name']
         path = data['url']
-    except: return {'message' : f"Invalid key names in nodes_data",  "URL" : path}
+    except: return {'message' : f"Invalid key names in nodes_data"}
     
     try:
         start = time.time()
@@ -368,7 +368,7 @@ async def upload_document(data):
         
         return {'message' : f"Document reading timeout", "URL" : path}
     
-    except Exception:
+    except Exception as e:
         req = {
             "doc_id" : str(my_uuid),
             "path" : path,
@@ -430,7 +430,27 @@ async def upload_document(data):
     return {'message' : f"Document was created in database", "URL" : path}
     
     
-
+@app.route("/delete_node", methods=["DELETE"])
+async def delete_node():
+    
+    try:
+        project_id = request.json['project_id']
+        node_id = request.json['node_id']
+    except:
+        abort(403, "Invalid raw data")
+        
+    all_docs = await get_list()
+    file_ids = list(set([(item['doc_id'], item['path']) for item in all_docs.json['docs'] if (item['node_id'] == node_id) and (item['project_id'] == project_id)]))
+    
+    if not file_ids:
+        return {'message' : f"There's no document with {project_id} project_id and {node_id} node_id"}
+    
+    
+    else: 
+        delete_ids = [delete(doc_id[0], doc_id[1]) for doc_id in file_ids]
+        return {"messages" : await asyncio.gather(*delete_ids)}
+    
+    
 @app.route("/search", methods=["POST"])
 def get_page():
 
@@ -443,7 +463,7 @@ def get_page():
         sortOrder = request.json['sortOrder']
         sortField = request.json['sortField']
         
-    except: abort(403, "Invalid form-data")
+    except: abort(403, "Invalid raw data")
     
     if len(keyword.strip()) < 3:
         abort(422, "Search terms must contain at least 3 characters")
@@ -724,7 +744,7 @@ async def get_list():
     return jsonify({'docs' : documents, 'status' : 200})
     
     
-@app.route("/delete/<string:document_id>", methods=["DELETE"])
+# @app.route("/delete/<string:document_id>", methods=["DELETE"])
 async def delete(document_id, path):
     
     query = {
@@ -739,8 +759,8 @@ async def delete(document_id, path):
     response = es.delete_by_query(index=INDEX, body=query)
     print(response)
     if response['deleted']:
-        return {'message' : f"Document was deleted from database.", 'URL' : path}
-    else: abort(400, f"Document {path} doesn't exist in database.")
+        return {'message' : "Document was deleted from database.", 'URL' : path}
+    else: return {'message' : "Document doesn't exist in database.", 'URL' : path}
     
     
 @app.route("/clean", methods=["DELETE"])    
