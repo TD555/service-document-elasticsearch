@@ -670,7 +670,7 @@ def get_page():
     print(sentences.keys())
     for url, item in sentences.items():
         new_dict = defaultdict()
-        item['path'] = url
+        item['path'] = url[0]
         keys = ('node_id', 'node_name', 'project_id', 'property_id', 'property_name', 'type_id', 'type_name', 'color', 'default_image')
         
         for key in keys:
