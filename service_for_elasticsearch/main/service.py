@@ -71,7 +71,7 @@ put_data = {
 
 try:
     es.indices.delete(index="my_index", ignore_unavailable=True)
-    es.indices.create(index=INDEX, body=put_data, )
+    es.indices.create(index=INDEX, body=put_data)
     
 except BadRequestError as e: 
     # print(str(e))
