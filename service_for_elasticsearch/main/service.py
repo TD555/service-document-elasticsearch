@@ -26,7 +26,7 @@ app = Flask(__name__)
 # MODEL = "gpt-3.5-turbo"
 
 # URL = "http://192.168.0.176:5000"
-INDEX = 'my_index'
+INDEX = 'araks_index'
 
 es_host = os.environ['ELASTICSEARCH_URL']
 # es_host = "http://localhost:9201/"
@@ -70,10 +70,11 @@ put_data = {
 
 
 try:
-    es.indices.create(index="my_index", body=put_data)
+    es.indices.delete(index="my_index", ignore_unavailable=True)
+    es.indices.create(index=INDEX, body=put_data, )
     
 except BadRequestError as e: 
-    print(str(e))
+    # print(str(e))
     pass
 
 
@@ -591,7 +592,7 @@ def get_page():
     
     if not re.match(r'.*[ +].*', keyword.strip()):
         try:
-            result = es.search(index="my_index", body=query1, scroll=scroll_timeout, size=scroll_size)
+            result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
             # print(result)
 
         except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
@@ -621,7 +622,7 @@ def get_page():
        
         # search for documents in the index and get only the ids
         try:
-            result = es.search(index="my_index", body=query2, scroll=scroll_timeout, size=scroll_size)
+            result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
 
         except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
@@ -633,7 +634,7 @@ def get_page():
         if not hits:
             try:
                 query2['query']['bool']['must'][0]['span_near']['in_order'] = 'false'
-                result = es.search(index="my_index", body=query2, scroll=scroll_timeout, size=scroll_size)
+                result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
             except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
             except:
@@ -648,7 +649,7 @@ def get_page():
                     query1["query"]["bool"]["should"][1]['query_string']['query'] = '*' + keyword + '*'
                     query1["query"]["bool"]["should"][2]['match']['filename']['query'] = keyword
                     
-                    result = es.search(index="my_index", body=query1, scroll=scroll_timeout, size=scroll_size)
+                    result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
                     hits = result["hits"]["hits"]
                     # print(hits)
                 except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
