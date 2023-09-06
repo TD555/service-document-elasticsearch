@@ -7,7 +7,6 @@ from collections import defaultdict
 import tempfile
 import uuid
 import traceback
-import math
 import time
 import pytz
 
@@ -44,15 +43,8 @@ put_data = {
     "analysis": {
       "analyzer": {
         "my_analyzer": {
-          "tokenizer": "my_tokenizer",
+          "tokenizer": "standard",
           "filter": ["lowercase"]
-        }
-      },
-      "tokenizer": {
-        "my_tokenizer": {
-          "type": "pattern",
-          "pattern": "[ ]+"
-
         }
       }
     }
@@ -65,7 +57,12 @@ put_data = {
       },
       "page_content" : {
           "type": "text",
-          "analyzer" : "my_analyzer"
+          "analyzer" : "my_analyzer",
+          "term_vector": "with_positions_offsets"
+      },
+      "filename" : {
+          "type": "text",
+          "term_vector": "with_positions_offsets"
       }
     }
   }
@@ -75,7 +72,8 @@ put_data = {
 try:
     es.indices.create(index="my_index", body=put_data)
     
-except BadRequestError: 
+except BadRequestError as e: 
+    print(str(e))
     pass
 
 
@@ -108,6 +106,7 @@ def get_context(output_stream, interpreter, all_texts, all_pages):
 
         text = output_stream.getvalue()
 
+        print(text)
         # do something with the text for this page
         text = text.replace("\n", " ")
         all_texts.append(text)
@@ -148,8 +147,10 @@ async def extract_text_from_doc(doc_file):
 
     document_content = io.BytesIO(doc_file.read())
     temp_file = tempfile.NamedTemporaryFile(suffix='.docx')
+
     temp_file.write(document_content.getvalue())
     document_path = temp_file.name
+    
 
 
     try:
@@ -166,6 +167,31 @@ async def extract_text_from_doc(doc_file):
     
     return all_texts
 
+
+async def extract_text_from_ppt(ppt_file):
+    
+    ppt_file.seek(0)
+    
+    ppt_content = io.BytesIO(ppt_file.read())
+    temp_file = tempfile.NamedTemporaryFile(suffix='.pptx')
+    temp_file.write(ppt_content.getvalue())
+    ppt_path = temp_file.name
+
+    try:
+        pdf_bytes = subprocess.check_output(["unoconv", "-f", "pdf", "--stdout", ppt_path])
+    except subprocess.CalledProcessError as e:
+        return {"message": e.stderr}
+
+    pdf_stream = io.BytesIO(pdf_bytes)
+
+    all_texts = await extract_text_from_pdf(pdf_stream)
+
+    temp_file.close()
+
+    return all_texts
+    
+    
+    
 
 @app.errorhandler(Exception)
 def handle_error(error):
@@ -341,6 +367,8 @@ async def upload_document(data):
 
         elif filename.endswith('.docx') or filename.endswith('.doc') or filename.endswith('.msword') or filename.endswith('.document'): texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
 
+        elif filename.endswith('.pptx') or filename.endswith('.ppt'): texts = await asyncio.wait_for(extract_text_from_ppt(ppt_file=file), upload_timeout - request_time)
+        
         else: return {'message' : f"Invalid type of document", "URL" : path}
             
     except asyncio.TimeoutError:
@@ -516,11 +544,13 @@ def get_page():
                     "type": "plain",
                     "fragmenter": "span",
                     "number_of_fragments" : 1000,
-                    "order": "score"},
+                    "order": "score"
+                    },
                 "filename" : {
                     "type": "plain",
                     "number_of_fragments" : 0,
-                    "fragmenter": "span"}
+                    "fragmenter": "span"
+                    }
             }
         },
         "_source": ["path", "page", "project_id", "node_id", "user_id", "type_id", "property_id", "type_name", "property_name", "node_name", "filename", "color", "default_image", "created"]
@@ -574,6 +604,7 @@ def get_page():
         
     else: 
         for splited_text in keyword.strip().split():
+                print(splited_text.strip())
                 query2["query"]["bool"]["must"][0]["span_near"]["clauses"].append({  
                     "span_multi":{  
                         "match":{  
@@ -594,8 +625,8 @@ def get_page():
 
         except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
-        except:
-            abort(504, "Elasticsearch : Search Timeout error")
+        except Exception as e:
+            abort(500, str(e))
             
         hits = result["hits"]["hits"]
         
@@ -650,10 +681,12 @@ def get_page():
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["color"] = hit["_source"]["color"]
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["created"] = hit["_source"]["created"]
                 if hit['highlight'].get('page_content', [''])[0] and "match_content" not in sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]:
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_content"] =  hit['highlight'].get('page_content', [''])[0]
+                    print(hit['highlight'].get('page_content', [''])[0])
+                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_content"] =  hit['highlight'].get('page_content', [''])[0].strip()
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["page"] = hit["_source"]["page"]
                 for content in hit['highlight'].get('page_content', []):
                     # print("content - ", content)
+                    print(re.findall(r"<em>(.*?)</em>", content))
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_count"] += int(len(re.findall(r"<em>(.*?)</em>", content)))
                     
                     
@@ -700,7 +733,7 @@ def get_page():
         rows.sort(key=lambda x: x['updated'])
     else: abort(403, 'Invalid sortOrder and/or sortField value')
             
-    return jsonify({'rows' : rows[limit * (page-1) : limit * page], 'count' : math.ceil(len(rows) / limit), 'status' : 200})
+    return jsonify({'rows' : rows[limit * (page-1) : limit * page], 'count' : len(rows), 'status' : 200})
     
     
     
@@ -723,6 +756,7 @@ async def get_list():
                 "doc_id": hit["_source"]["doc_id"],
                 "type_id": hit["_source"]["type_id"],
                 "page": hit["_source"]["page"],
+                "page_content" : hit["_source"]["page_content"],
                 "created": hit["_source"]["created"],
                 "project_id": hit["_source"]["project_id"],
                 "node_id": hit["_source"]["node_id"],
