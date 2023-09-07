@@ -44,8 +44,15 @@ put_data = {
     "analysis": {
       "analyzer": {
         "my_analyzer": {
-          "tokenizer": "standard",
+          "tokenizer": "my_tokenizer",
           "filter": ["lowercase"]
+        }
+      },
+      "tokenizer": {
+        "my_tokenizer": {
+          "type": "pattern",
+          "pattern": "[ ]+"
+
         }
       }
     }
