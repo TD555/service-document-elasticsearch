@@ -26,7 +26,7 @@ app = Flask(__name__)
 # MODEL = "gpt-3.5-turbo"
 
 # URL = "http://192.168.0.176:5000"
-INDEX = 'araks_index'
+INDEX = 'my_index'
 
 es_host = os.environ['ELASTICSEARCH_URL']
 # es_host = "http://localhost:9201/"
