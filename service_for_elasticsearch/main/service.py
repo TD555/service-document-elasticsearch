@@ -756,17 +756,17 @@ async def get_list():
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
    
     
-try:
-    # Elasticsearch query or operation
-    initial_search = es.search(index=INDEX, body=query, scroll='1m')
-except BadRequestError as e:
-    # Handle Elasticsearch BadRequestError
-    error_message = str(e)  # Get the error message from the exception
-    return {"error": error_message}, 400  # Return a 400 Bad Request response
-except elasticsearch.exceptions.ElasticsearchException as e:
-    # Handle other Elasticsearch exceptions
-    error_message = str(e)
-    return {"error": error_message}, 500  # Return a 500 Internal Server Error response
+    try:
+        # Elasticsearch query or operation
+        initial_search = es.search(index=INDEX, body=query, scroll='1m')
+    except BadRequestError as e:
+        # Handle Elasticsearch BadRequestError
+        error_message = str(e)  # Get the error message from the exception
+        return {"error": error_message}, 400  # Return a 400 Bad Request response
+    except elasticsearch.exceptions.ElasticsearchException as e:
+        # Handle other Elasticsearch exceptions
+        error_message = str(e)
+        return {"error": error_message}, 500  # Return a 500 Internal Server Error response
 
     scroll_id = initial_search['_scroll_id']
     total_results = initial_search['hits']['total']['value']
