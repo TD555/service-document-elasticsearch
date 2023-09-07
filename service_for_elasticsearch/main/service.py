@@ -763,7 +763,7 @@ async def get_list():
         # Handle Elasticsearch BadRequestError
         error_message = str(e)  # Get the error message from the exception
         return {"error": error_message}, 400  # Return a 400 Bad Request response
-    except elasticsearch.exceptions.ElasticsearchException as e:
+    except exceptions.ElasticsearchException as e:
         # Handle other Elasticsearch exceptions
         error_message = str(e)
         return {"error": error_message}, 500  # Return a 500 Internal Server Error response
