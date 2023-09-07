@@ -67,11 +67,6 @@ put_data = {
       "page_content" : {
           "type": "text",
           "analyzer" : "my_analyzer",
-          "term_vector": "with_positions_offsets"
-      },
-      "filename" : {
-          "type": "text",
-          "term_vector": "with_positions_offsets"
       }
     }
   }
@@ -80,7 +75,7 @@ put_data = {
 
 
 try:
-    es.indices.create(index=INDEX, body=put_data)
+    es.indices.create(index='my_index', body=put_data)
     
 except BadRequestError as e: 
     # print(str(e))
@@ -371,7 +366,7 @@ async def upload_document(data):
             }
             
 
-            es.index(index=INDEX, id = str(my_uuid), document=req)
+            es.index(index='my_index', id = str(my_uuid), document=req)
             raise Exception
             
         if filename.endswith('.pdf'): texts = await asyncio.wait_for(extract_text_from_pdf(pdf_file=file), upload_timeout - request_time)
@@ -403,7 +398,7 @@ async def upload_document(data):
         }
         
 
-        es.index(index=INDEX, id = str(my_uuid), document=req)
+        es.index(index='my_index', id = str(my_uuid), document=req)
         
         return {'message' : f"Document reading timeout", "URL" : path}
     
@@ -428,7 +423,7 @@ async def upload_document(data):
         }
         
 
-        es.index(index=INDEX, id = str(my_uuid), document=req)
+        es.index(index='my_index', id = str(my_uuid), document=req)
         return {'message' : "Failed to read document", "URL" : path}
         
     finally:
@@ -463,7 +458,7 @@ async def upload_document(data):
         }
         
 
-        es.index(index=INDEX, id = str(my_uuid) + str(page_num), document=req)
+        es.index(index='my_index', id = str(my_uuid) + str(page_num), document=req)
         
     
     return {'message' : f"Document was created in database", "URL" : path}
@@ -602,7 +597,7 @@ def get_page():
     
     if not re.match(r'.*[ +].*', keyword.strip()):
         try:
-            result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
+            result = es.search(index='my_index', body=query1, scroll=scroll_timeout, size=scroll_size)
             # print(result)
 
         except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
@@ -632,7 +627,7 @@ def get_page():
        
         # search for documents in the index and get only the ids
         try:
-            result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
+            result = es.search(index='my_index', body=query2, scroll=scroll_timeout, size=scroll_size)
 
         except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
@@ -644,7 +639,7 @@ def get_page():
         if not hits:
             try:
                 query2['query']['bool']['must'][0]['span_near']['in_order'] = 'false'
-                result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
+                result = es.search(index='my_index', body=query2, scroll=scroll_timeout, size=scroll_size)
             except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
             except:
@@ -659,7 +654,7 @@ def get_page():
                     query1["query"]["bool"]["should"][1]['query_string']['query'] = '*' + keyword + '*'
                     query1["query"]["bool"]["should"][2]['match']['filename']['query'] = keyword
                     
-                    result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
+                    result = es.search(index='my_index', body=query1, scroll=scroll_timeout, size=scroll_size)
                     hits = result["hits"]["hits"]
                     # print(hits)
                 except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
@@ -754,20 +749,11 @@ async def get_list():
     query = {"query": {"match_all": {}}, "size": 1}
 
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
-   
-    
     try:
-        # Elasticsearch query or operation
-        initial_search = es.search(index=INDEX, body=query, scroll='1m')
-    except BadRequestError as e:
-        # Handle Elasticsearch BadRequestError
-        error_message = str(e)  # Get the error message from the exception
-        return {"error": error_message}, 400  # Return a 400 Bad Request response
-    except elasticsearch.exceptions.ElasticsearchException as e:
-        # Handle other Elasticsearch exceptions
-        error_message = str(e)
-        return {"error": error_message}, 500  # Return a 500 Internal Server Error response
-
+        initial_search = es.search(index='my_index', body=query, scroll='1m')
+    except Exception as e:
+        return {"message" : str(e)}
+    
     scroll_id = initial_search['_scroll_id']
     total_results = initial_search['hits']['total']['value']
 
@@ -814,7 +800,7 @@ async def delete(document_id, path):
     }
 
     # Use the delete_by_query API to delete all documents that match the query
-    response = es.delete_by_query(index=INDEX, body=query)
+    response = es.delete_by_query(index='my_index', body=query)
     print(response)
     if response['deleted']:
         return {'message' : "Document was deleted from database.", 'URL' : path}
@@ -829,6 +815,6 @@ async def clean():
         }
     }
 
-    if es.delete_by_query(index=INDEX, body=query)['deleted']:
+    if es.delete_by_query(index='my_index', body=query)['deleted']:
         return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
     else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})
