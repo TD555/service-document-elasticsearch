@@ -9,7 +9,7 @@ import uuid
 import traceback
 import time
 import pytz
-from elasticsearch.exceptions import BadRequestError
+ 
 
 from pdfminer.converter import TextConverter
 from pdfminer.pdfinterp import PDFPageInterpreter
@@ -77,6 +77,15 @@ put_data = {
   }
 }
 
+
+
+try:
+    es.indices.create(index=INDEX, body=put_data)
+    
+except BadRequestError as e: 
+    # print(str(e))
+    pass
+
 try:
     # Elasticsearch query or operation
     results = es.search(index=INDEX, body=query, _source=fields)
@@ -89,14 +98,7 @@ except elasticsearch.exceptions.ElasticsearchException as e:
     error_message = str(e)
     return {"error": error_message}, 500  # Return a 500 Internal Server Error response
 
-try:
-    es.indices.create(index=INDEX, body=put_data)
     
-except BadRequestError as e: 
-    # print(str(e))
-    pass
-
-
 async def get_filestorage_object(url):
     response = await asyncio.get_event_loop().run_in_executor(None, requests.get, url)
     if response.status_code == 200:
