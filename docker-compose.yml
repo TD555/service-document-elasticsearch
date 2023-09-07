@@ -28,7 +28,7 @@ services:
       - cluster.routing.allocation.disk.threshold_enabled = false
 
     volumes:
-      - elasticsearch_data:/usr/share/elasticsearch/data
+      - elasticsearch_data1:/usr/share/elasticsearch/data
 
   flask_elastic_app:
     build: ./service_for_elasticsearch
@@ -43,4 +43,4 @@ services:
     restart: always
 
 volumes:
-  elasticsearch_data:
+  elasticsearch_data1:
