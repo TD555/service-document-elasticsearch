@@ -30,6 +30,7 @@ INDEX = 'araks_index'
 
 es_host = os.environ['ELASTICSEARCH_URL']
 # es_host = "http://localhost:9201/"
+
 es = Elasticsearch([es_host]) 
 
 request_timeout = 20
@@ -70,7 +71,6 @@ put_data = {
 
 
 try:
-    es.indices.delete(index="my_index", ignore_unavailable=True)
     es.indices.create(index=INDEX, body=put_data)
     
 except BadRequestError as e: 
