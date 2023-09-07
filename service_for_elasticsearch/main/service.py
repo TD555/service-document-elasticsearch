@@ -753,7 +753,11 @@ async def get_list():
         initial_search = es.search(index='my_index', body=query, scroll='1m')
     except Exception as e:
         return {"message" : str(e)}
+<<<<<<< HEAD
 
+=======
+    
+>>>>>>> ce27079253d9a6663982805ace3f6a37e4f4aa24
     scroll_id = initial_search['_scroll_id']
     total_results = initial_search['hits']['total']['value']
 
