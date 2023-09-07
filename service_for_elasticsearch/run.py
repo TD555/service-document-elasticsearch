@@ -23,6 +23,7 @@ def is_elasticsearch_available():
 
 if __name__ == "__main__":
     if is_elasticsearch_available():
+        time.sleep(5)
         import sys
         sys.path.insert(0, './main')
         from service import app
