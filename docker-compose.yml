@@ -9,7 +9,7 @@ services:
     environment:
       - xpack.security.enabled=false
       - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms750m -Xmx750m
+      - ES_JAVA_OPTS=-Xms2g -Xmx2g  
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
 
@@ -24,5 +24,6 @@ services:
       PYTHONUNBUFFERED: 0
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
     restart: always
+
 volumes:
   elasticsearch_data:
