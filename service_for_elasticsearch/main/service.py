@@ -740,7 +740,7 @@ def get_page():
 @app.route("/get_list", methods=["GET"])
 async def get_list():
 
-    query = {"query": {"match_all": {}}, "size": 1}
+    query = {"query": {"match_all": {}}, "size": 10000}
 
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
     try:
