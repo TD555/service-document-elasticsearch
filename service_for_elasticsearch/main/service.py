@@ -369,7 +369,30 @@ async def upload_document(data):
 
         elif filename.endswith('.pptx') or filename.endswith('.ppt'): texts = await asyncio.wait_for(extract_text_from_ppt(ppt_file=file), upload_timeout - request_time)
         
-        else: return {'message' : f"Invalid type of document", "URL" : path}
+        else: 
+            req = {
+                "doc_id" : str(my_uuid),
+                "path" : path,
+                "project_id" : project_id,
+                "user_id" : user_id,
+                "node_id" : node_id,
+                "type_id" : type_id,
+                "property_id" : property_id,
+                "node_name" : node_name,
+                "type_name" : type_name,
+                "property_name" : property_name,
+                "color" : color,
+                "default_image" : default_image,
+                "filename" : name,
+                "page" : 0,
+                "page_content": "",
+                "created": str(gmt_plus_4_time_str),
+            }
+        
+
+            es.index(index=INDEX, id = str(my_uuid), document=req)
+            
+            return {'message' : f"Invalid type of document", "URL" : path}
             
     except asyncio.TimeoutError:
         req = {
