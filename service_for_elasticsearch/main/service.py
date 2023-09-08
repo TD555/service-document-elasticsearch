@@ -68,7 +68,6 @@ put_data = {
 
 
 try:
-    es.indices.delete(index="my_index", ignore_unavailable=True)
     es.indices.create(index=INDEX, body=put_data)
     
 except BadRequestError as e: 
@@ -143,55 +142,75 @@ import subprocess
 
 async def extract_text_from_doc(doc_file):
 
-    doc_file.seek(0)
-
-    document_content = io.BytesIO(doc_file.read())
-    temp_file = tempfile.NamedTemporaryFile(suffix='.docx')
-
-    temp_file.write(document_content.getvalue())
-    document_path = temp_file.name
-    
-
-
     try:
+        doc_file.seek(0)
+
+        document_content = io.BytesIO(doc_file.read())
+        temp_file = tempfile.NamedTemporaryFile(suffix='.docx')
+
+        temp_file.write(document_content.getvalue())
+        document_path = temp_file.name
+    
         pdf_bytes = subprocess.check_output(["unoconv", "-f", "pdf", "--stdout", document_path])
 
-    except subprocess.CalledProcessError as e:
+
+        # Create a BytesIO object from the PDF content
+        pdf_stream = io.BytesIO(pdf_bytes)
+
+        all_texts = await extract_text_from_pdf(pdf_stream)
+        temp_file.close()
+        
+        return all_texts
+
+    except Exception as e:
         return {"message": e.stderr}
-
-    # Create a BytesIO object from the PDF content
-    pdf_stream = io.BytesIO(pdf_bytes)
-
-    all_texts = await extract_text_from_pdf(pdf_stream)
-    temp_file.close()
-    
-    return all_texts
-
 
 async def extract_text_from_ppt(ppt_file):
-    
-    ppt_file.seek(0)
-    
-    ppt_content = io.BytesIO(ppt_file.read())
-    temp_file = tempfile.NamedTemporaryFile(suffix='.pptx')
-    temp_file.write(ppt_content.getvalue())
-    ppt_path = temp_file.name
 
     try:
+        ppt_file.seek(0)
+        
+        ppt_content = io.BytesIO(ppt_file.read())
+        temp_file = tempfile.NamedTemporaryFile(suffix='.pptx')
+        temp_file.write(ppt_content.getvalue())
+        ppt_path = temp_file.name
+
         pdf_bytes = subprocess.check_output(["unoconv", "-f", "pdf", "--stdout", ppt_path])
-    except subprocess.CalledProcessError as e:
+        pdf_stream = io.BytesIO(pdf_bytes)
+
+        all_texts = await extract_text_from_pdf(pdf_stream)
+
+        temp_file.close()
+
+        return all_texts
+    
+    except Exception as e:
         return {"message": e.stderr}
-
-    pdf_stream = io.BytesIO(pdf_bytes)
-
-    all_texts = await extract_text_from_pdf(pdf_stream)
-
-    temp_file.close()
-
-    return all_texts
     
     
+async def extract_text_from_xls(xls_file):
+    try:
+        # Read the XLSX file
+        xlsx_content = xls_file.read()
+
+        # Create a temporary XLSX file
+        temp_xlsx_file = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
+        temp_xlsx_file.write(xlsx_content)
+        temp_xlsx_path = temp_xlsx_file.name
+        
+        pdf_bytes = subprocess.check_output(["unoconv", "-f", "pdf", "--stdout", temp_xlsx_path])
+
+        pdf_stream = io.BytesIO(pdf_bytes)
+
+        all_texts = await extract_text_from_pdf(pdf_stream)
+
+        temp_xlsx_file.close()
+
+        return all_texts
     
+    except Exception as e:
+        return {"message": e.stderr}    
+
 
 @app.errorhandler(Exception)
 def handle_error(error):
@@ -368,6 +387,8 @@ async def upload_document(data):
         elif filename.endswith('.docx') or filename.endswith('.doc') or filename.endswith('.msword') or filename.endswith('.document'): texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
 
         elif filename.endswith('.pptx') or filename.endswith('.ppt'): texts = await asyncio.wait_for(extract_text_from_ppt(ppt_file=file), upload_timeout - request_time)
+        
+        elif filename.endswith('.xlsx') or filename.endswith('.xls'): texts = await asyncio.wait_for(extract_text_from_xls(xls_file=file), upload_timeout - request_time)
         
         else: 
             req = {
