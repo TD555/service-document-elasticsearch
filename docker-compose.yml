@@ -21,11 +21,7 @@ services:
       - threadpool.bulk.queue_size = 200000
 
       - index.merge.scheduler.max_thread_count = 1
-      - cluster.routing.allocation.disk.watermark.low = 85%
-      - cluster.routing.allocation.disk.watermark.high = 90%
-      - cluster.routing.allocation.disk.watermark.flood_stage = 95%
-      - cluster.info.update.interval = 1m 
-      - cluster.routing.allocation.disk.threshold_enabled = false
+      - search.max_open_scroll_context = 500
 
     volumes:
       - elasticsearch_data1:/usr/share/elasticsearch/data
