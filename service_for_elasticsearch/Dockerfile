@@ -1,6 +1,6 @@
 FROM python:3.8.10
 
-RUN rm -rf /var/lib/apt/lists/* && apt-get update && \
+RUN rm -rf /var/lib/apt/lists/* &&  apt-get update && \
     apt-get install -y unoconv libreoffice --no-install-recommends
 
 RUN cp /usr/bin/unoconv /usr/local/bin/unoconv

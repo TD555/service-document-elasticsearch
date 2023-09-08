@@ -27,7 +27,7 @@ app = Flask(__name__)
 # MODEL = "gpt-3.5-turbo"
 
 # URL = "http://192.168.0.176:5000"
-INDEX = 'my_index'
+INDEX = 'araks_index'
 
 es_host = os.environ['ELASTICSEARCH_URL']
 # es_host = "http://localhost:9201/"
@@ -45,15 +45,8 @@ put_data = {
     "analysis": {
       "analyzer": {
         "my_analyzer": {
-          "tokenizer": "my_tokenizer",
+          "tokenizer": "standard",
           "filter": ["lowercase"]
-        }
-      },
-      "tokenizer": {
-        "my_tokenizer": {
-          "type": "pattern",
-          "pattern": "[ ]+"
-
         }
       }
     }
@@ -75,7 +68,8 @@ put_data = {
 
 
 try:
-    es.indices.create(index='my_index', body=put_data)
+    es.indices.delete(index="my_index", ignore_unavailable=True)
+    es.indices.create(index=INDEX, body=put_data)
     
 except BadRequestError as e: 
     # print(str(e))
@@ -366,7 +360,7 @@ async def upload_document(data):
             }
             
 
-            es.index(index='my_index', id = str(my_uuid), document=req)
+            es.index(index=INDEX, id = str(my_uuid), document=req)
             raise Exception
             
         if filename.endswith('.pdf'): texts = await asyncio.wait_for(extract_text_from_pdf(pdf_file=file), upload_timeout - request_time)
@@ -398,7 +392,7 @@ async def upload_document(data):
         }
         
 
-        es.index(index='my_index', id = str(my_uuid), document=req)
+        es.index(index=INDEX, id = str(my_uuid), document=req)
         
         return {'message' : f"Document reading timeout", "URL" : path}
     
@@ -423,7 +417,7 @@ async def upload_document(data):
         }
         
 
-        es.index(index='my_index', id = str(my_uuid), document=req)
+        es.index(index=INDEX, id = str(my_uuid), document=req)
         return {'message' : "Failed to read document", "URL" : path}
         
     finally:
@@ -458,7 +452,7 @@ async def upload_document(data):
         }
         
 
-        es.index(index='my_index', id = str(my_uuid) + str(page_num), document=req)
+        es.index(index=INDEX, id = str(my_uuid) + str(page_num), document=req)
         
     
     return {'message' : f"Document was created in database", "URL" : path}
@@ -597,7 +591,7 @@ def get_page():
     
     if not re.match(r'.*[ +].*', keyword.strip()):
         try:
-            result = es.search(index='my_index', body=query1, scroll=scroll_timeout, size=scroll_size)
+            result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
             # print(result)
 
         except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
@@ -627,7 +621,7 @@ def get_page():
        
         # search for documents in the index and get only the ids
         try:
-            result = es.search(index='my_index', body=query2, scroll=scroll_timeout, size=scroll_size)
+            result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
 
         except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
@@ -639,7 +633,7 @@ def get_page():
         if not hits:
             try:
                 query2['query']['bool']['must'][0]['span_near']['in_order'] = 'false'
-                result = es.search(index='my_index', body=query2, scroll=scroll_timeout, size=scroll_size)
+                result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
             except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
 
             except:
@@ -654,7 +648,7 @@ def get_page():
                     query1["query"]["bool"]["should"][1]['query_string']['query'] = '*' + keyword + '*'
                     query1["query"]["bool"]["should"][2]['match']['filename']['query'] = keyword
                     
-                    result = es.search(index='my_index', body=query1, scroll=scroll_timeout, size=scroll_size)
+                    result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
                     hits = result["hits"]["hits"]
                     # print(hits)
                 except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
@@ -750,9 +744,16 @@ async def get_list():
 
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
     try:
-        initial_search = es.search(index='my_index', body=query, scroll='1m')
+        while True:
+            if es.indices.exists(index=INDEX):
+                initial_search = es.search(index=INDEX, body=query, scroll='1m')
+                break
+            else: 
+                time.sleep(1)
+                continue
+            
     except Exception as e:
-        return {"message" : str(e)}
+        abort(500, str(e))
     scroll_id = initial_search['_scroll_id']
     total_results = initial_search['hits']['total']['value']
 
@@ -799,7 +800,7 @@ async def delete(document_id, path):
     }
 
     # Use the delete_by_query API to delete all documents that match the query
-    response = es.delete_by_query(index='my_index', body=query)
+    response = es.delete_by_query(index=INDEX, body=query)
     print(response)
     if response['deleted']:
         return {'message' : "Document was deleted from database.", 'URL' : path}
@@ -814,6 +815,6 @@ async def clean():
         }
     }
 
-    if es.delete_by_query(index='my_index', body=query)['deleted']:
+    if es.delete_by_query(index=INDEX, body=query)['deleted']:
         return jsonify({'message' : f"Elasticsearch database has cleaned successfully.", 'status' : 200})
     else: return jsonify({'message' : f"No document found in Elasticsearch database.", 'status' : 200})
