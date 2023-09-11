@@ -9,7 +9,8 @@ import uuid
 import traceback
 import time
 import pytz
- 
+import openpyxl
+
 
 from pdfminer.converter import TextConverter
 from pdfminer.pdfinterp import PDFPageInterpreter
@@ -198,12 +199,23 @@ async def extract_text_from_xls(xls_file):
         temp_xlsx_file.write(xlsx_content)
         temp_xlsx_path = temp_xlsx_file.name
         
-        pdf_bytes = subprocess.check_output(["unoconv", "-f", "pdf", "--stdout", temp_xlsx_path])
+        workbook = openpyxl.load_workbook(temp_xlsx_path)
+        
+        all_texts = []
+        
+        for sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
+            
+            row_str = []
+            # Loop through each row in the sheet
+            for row in sheet.iter_rows(values_only=True):
+                print(row)
+                row_str.append(" ".join(map(str, row)))
+                
+                # Print the formatted row
+            all_texts.append(sheet_name + ' ' + " ".join(row_str).strip())
 
-        pdf_stream = io.BytesIO(pdf_bytes)
-
-        all_texts = await extract_text_from_pdf(pdf_stream)
-
+        workbook.close()
         temp_xlsx_file.close()
 
         return all_texts
