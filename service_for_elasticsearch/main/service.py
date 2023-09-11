@@ -10,7 +10,8 @@ import traceback
 import time
 import pytz
 import openpyxl
-
+import xlrd
+import subprocess
 
 from pdfminer.converter import TextConverter
 from pdfminer.pdfinterp import PDFPageInterpreter
@@ -35,8 +36,8 @@ es_host = os.environ['ELASTICSEARCH_URL']
 
 es = Elasticsearch([es_host]) 
 
-request_timeout = 20
-upload_timeout = 40
+request_timeout = 30
+upload_timeout = 30
 
 gmt_plus_4 = pytz.timezone('Asia/Dubai')
 
@@ -58,13 +59,14 @@ put_data = {
         "type": "date",
         "format": "yyyy-MM-dd HH:mm:ss"
       },
-      "page_content" : {
-          "type": "text",
-          "analyzer" : "my_analyzer",
+      "page_content": {
+        "type": "text",
+        "analyzer": "my_analyzer"
       }
     }
   }
 }
+
 
 
 
@@ -76,6 +78,18 @@ except BadRequestError as e:
     pass
 
 
+settings = {
+        "highlight.max_analyzed_offset": 10000000
+}
+
+try:
+    es.indices.put_settings(index=INDEX, settings=settings)
+    OFFSET = 10000000
+except BadRequestError as e: 
+    # print(str(e))
+    OFFSET = 1000000
+    pass
+    
     
 async def get_filestorage_object(url):
     response = await asyncio.get_event_loop().run_in_executor(None, requests.get, url)
@@ -139,7 +153,6 @@ async def extract_text_from_pdf(pdf_file):
     return all_texts
 
 
-import subprocess
 
 async def extract_text_from_doc(doc_file):
 
@@ -187,18 +200,17 @@ async def extract_text_from_ppt(ppt_file):
     
     except Exception as e:
         return {"message": e.stderr}
-    
-    
-async def extract_text_from_xls(xls_file):
+
+         
+async def extract_text_from_xlsx(xlsx_file):
     try:
-        # Read the XLSX file
-        xlsx_content = xls_file.read()
+        xlsx_content = xlsx_file.read()
 
         # Create a temporary XLSX file
         temp_xlsx_file = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
         temp_xlsx_file.write(xlsx_content)
         temp_xlsx_path = temp_xlsx_file.name
-        
+
         workbook = openpyxl.load_workbook(temp_xlsx_path)
         
         all_texts = []
@@ -222,6 +234,39 @@ async def extract_text_from_xls(xls_file):
     
     except Exception as e:
         return {"message": e.stderr}    
+
+import xlrd
+
+async def extract_text_from_xls(xls_file):
+    try:
+        xls_content = xls_file.read()
+
+        # Create a temporary XLSX file
+        temp_xls_file = tempfile.NamedTemporaryFile(suffix='.xls', delete=False)
+        temp_xls_file.write(xls_content)
+        temp_xls_path = temp_xls_file.name
+        
+        xls_workbook = xlrd.open_workbook(temp_xls_path)
+        
+        all_texts = []
+        
+        for sheet_name in xls_workbook.sheet_names():
+            sheet = xls_workbook.sheet_by_name(sheet_name)
+            
+            rows = []
+            
+            # Loop through each row in the sheet
+            for row_num in range(sheet.nrows):
+                row = sheet.row_values(row_num)
+                rows.append(" ".join(map(str, row)))
+            
+            all_texts.append(sheet_name + ' ' + " ".join(rows).strip())
+        
+        return all_texts
+    
+    except Exception as e:
+        return {"message": e.stderr}    
+
 
 
 @app.errorhandler(Exception)
@@ -393,14 +438,16 @@ async def upload_document(data):
 
             es.index(index=INDEX, id = str(my_uuid), document=req)
             raise Exception
-            
+        
         if filename.endswith('.pdf'): texts = await asyncio.wait_for(extract_text_from_pdf(pdf_file=file), upload_timeout - request_time)
 
         elif filename.endswith('.docx') or filename.endswith('.doc') or filename.endswith('.msword') or filename.endswith('.document'): texts = await asyncio.wait_for(extract_text_from_doc(doc_file=file), upload_timeout - request_time)
 
         elif filename.endswith('.pptx') or filename.endswith('.ppt'): texts = await asyncio.wait_for(extract_text_from_ppt(ppt_file=file), upload_timeout - request_time)
         
-        elif filename.endswith('.xlsx') or filename.endswith('.xls'): texts = await asyncio.wait_for(extract_text_from_xls(xls_file=file), upload_timeout - request_time)
+        elif filename.endswith('.xlsx') : texts = await asyncio.wait_for(extract_text_from_xlsx(xlsx_file=file), upload_timeout - request_time)
+        
+        elif filename.endswith('.xls') : texts = await asyncio.wait_for(extract_text_from_xls(xls_file=file), upload_timeout - request_time)
         
         else: 
             req = {
@@ -571,7 +618,7 @@ def get_page():
                                 "query": keyword.strip(),
                                 "operator" : "AND",
                                 "fuzziness": "AUTO",
-                                "analyzer" : "my_analyzer",
+                                "analyzer" : "my_analyzer"
                             }
                         }
                     },
@@ -600,7 +647,8 @@ def get_page():
                     "type": "plain",
                     "fragmenter": "span",
                     "number_of_fragments" : 1000,
-                    "order": "score"
+                    "order": "score",
+                    "max_analyzed_offset": OFFSET
                     },
                 "filename" : {
                     "type": "plain",
@@ -633,7 +681,8 @@ def get_page():
                             "type": "plain",
                             "fragmenter": "span",
                             "number_of_fragments" : 1000,
-                            "order": "score" 
+                            "order": "score",
+                            "max_analyzed_offset": OFFSET
                         },
                     "filename" : {
                             "type": "plain",
@@ -650,10 +699,10 @@ def get_page():
             result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
             # print(result)
 
-        except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
+        except ConnectionError : abort(408, "Elasticsearch : Connection Timeout error")
         
-        except:
-            abort(504, "Elasticsearch : Search Timeout error")
+        except Exception as e:
+            abort(500, str(e))
         
         hits = result["hits"]["hits"]
         # print(hits)
@@ -679,7 +728,7 @@ def get_page():
         try:
             result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
 
-        except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
+        except ConnectionError : abort(408, "Elasticsearch : Connection Timeout error")
 
         except Exception as e:
             abort(500, str(e))
@@ -690,11 +739,10 @@ def get_page():
             try:
                 query2['query']['bool']['must'][0]['span_near']['in_order'] = 'false'
                 result = es.search(index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size)
-            except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
-
-            except:
-                abort(504, "Elasticsearch : Search Timeout error")
+            except ConnectionError : abort(408, "Elasticsearch : Connection Timeout error")
             
+            except Exception as e:
+                abort(500, str(e))
             hits = result["hits"]["hits"]
             
             if not hits:
@@ -707,9 +755,10 @@ def get_page():
                     result = es.search(index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size)
                     hits = result["hits"]["hits"]
                     # print(hits)
-                except ConnectionError : abort(504, "Elasticsearch : Connection Timeout error")
-                except:
-                    abort(504, "Elasticsearch : Search Timeout error")
+                except ConnectionError : abort(408, "Elasticsearch : Connection Timeout error")
+                
+                except Exception as e:
+                    abort(500, str(e))
 
     
     sentences = {}
@@ -737,7 +786,7 @@ def get_page():
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["color"] = hit["_source"]["color"]
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["created"] = hit["_source"]["created"]
                 if hit['highlight'].get('page_content', [''])[0] and "match_content" not in sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]:
-                    print(hit['highlight'].get('page_content', [''])[0])
+                    # print(hit['highlight'].get('page_content', [''])[0])
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["match_content"] =  hit['highlight'].get('page_content', [''])[0].strip()
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])]["page"] = hit["_source"]["page"]
                 for content in hit['highlight'].get('page_content', []):
@@ -749,14 +798,14 @@ def get_page():
         scroll_id = result.get("_scroll_id")
         try:
             result = es.scroll(scroll_id=scroll_id, scroll=scroll_timeout)
-        except:
-            abort(504, "Elasticsearch : Search Timeout error")
+        except Exception as e:
+            abort(500, str(e))
             
         hits = result["hits"]["hits"]
 
 
     rows = []
-    print(sentences.keys())
+    # print(sentences.keys())
     for url, item in sentences.items():
         new_dict = defaultdict()
         item['path'] = url[0]
@@ -857,7 +906,7 @@ async def delete(document_id, path):
 
     # Use the delete_by_query API to delete all documents that match the query
     response = es.delete_by_query(index=INDEX, body=query)
-    print(response)
+    # print(response)
     if response['deleted']:
         return {'message' : "Document was deleted from database.", 'URL' : path}
     else: return {'message' : "Document doesn't exist in database.", 'URL' : path}

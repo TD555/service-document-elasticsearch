@@ -7,3 +7,4 @@ requests==2.31.0
 elasticsearch==8.6.2
 pdfminer==20191125
 openpyxl==3.1.2
+xlrd==2.0.1
