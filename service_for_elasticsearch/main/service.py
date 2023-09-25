@@ -1,5 +1,6 @@
 from flask import Flask, jsonify, request, json, abort, render_template
 from elasticsearch import Elasticsearch, ConnectionError , BadRequestError, exceptions
+from elasticsearch.helpers import bulk
 import asyncio
 from datetime import datetime
 import requests
@@ -317,18 +318,27 @@ async def create_or_update():
         abort(403, "Invalid raw data")
     
     all_docs = await get_list()
-    filenames = list(set([item['path'] for item in all_docs.json['docs'] if item['node_id'] == data_dict['node_id']]))
     
-    print("All filenames in the start", filenames)   
+    
+    id_dict = defaultdict(list)
+    for item in all_docs.json['docs']:
+        if item['node_id'] == data_dict['node_id']:
+            id_dict[item['path']].append(item['doc_id'] + str(item['page']-1))
+
+    
+    print("All filenames in the start", list(id_dict.keys()))   
+    filenames = list(id_dict.keys())
     data_dict['filenames'] = filenames
+    data_dict['id_dict'] = id_dict
     
     returned_jsons = []
     for item in remove_duplicates(nodes_data):
         result = {**data_dict, **item}      
         returned_jsons.append(upload_document(result))
     
-    print(returned_jsons)
+    # print(returned_jsons)
     returned_jsons = await asyncio.gather(*returned_jsons)
+    
     
     print("All filenames in the end", filenames)   
        
@@ -340,7 +350,7 @@ async def create_or_update():
         delete_response = await delete(old_id, filename)
         returned_jsons.append(delete_response)      
     
-    print((await get_list()).json['docs'])
+    # print((await get_list()).json['docs'])
     return jsonify({"messages" : returned_jsons, "status" : 200})
     
     
@@ -374,6 +384,7 @@ async def upload_document(data):
     color = data['color']
     default_image = data['default_image']
     filenames = data['filenames']
+    id_dict = data['id_dict']
     
     my_namespace = uuid.NAMESPACE_DNS  
 
@@ -381,15 +392,49 @@ async def upload_document(data):
     
     filename = os.path.basename(path)
 
-    print('filename : ',  filenames, filename)
     
     current_utc_time = datetime.utcnow()
     gmt_plus_4_time = current_utc_time.replace(tzinfo=pytz.utc).astimezone(gmt_plus_4)
 
     gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
     
-    if path in filenames:
+    if path in id_dict:
         filenames.remove(path)
+        update_request = {
+            "doc": {
+                "project_id" : project_id,
+                "user_id" : user_id,
+                "node_id" : node_id,
+                "type_id" : type_id,
+                "property_id" : property_id,
+                "node_name" : node_name,
+                "type_name" : type_name,
+                "property_name" : property_name,
+                "color" : color,
+                "default_image" : default_image,
+            }
+        }
+
+        # Update documents
+        update_actions = []
+
+        # Populate the list with update actions for each doc_id
+        for doc_id in data['id_dict'][path]:
+            update_actions.append({
+                "_op_type": "update",  # Specify the operation type
+                "_index": INDEX,
+                "_id": doc_id,
+                "_source": update_request  # Provide the update request for each document
+            })
+
+        # Use the bulk API to perform updates
+        success, failed = bulk(es, update_actions)
+
+        # Check for any failed updates
+        if failed:
+            for item in failed:
+                print(f"Failed to update document with ID {item['_id']}")
+        
         return {'message' : f"Document already exists in database.",  "URL" : path}
         
 
