@@ -36,6 +36,8 @@ services:
     environment:
       PYTHONUNBUFFERED: 0
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      AMAZON_URL: 'https://araks-projects-develop.s3.amazonaws.com/'
+      INDEX: 'araks_index'
     restart: always
 
 volumes:
