@@ -30,12 +30,12 @@ app = Flask(__name__)
 # MODEL = "gpt-3.5-turbo"
 
 # URL = "http://192.168.0.176:5000"
-INDEX = 'araks_index'
-
-es_host = os.environ['ELASTICSEARCH_URL']
+INDEX = os.environ['INDEX']
+AMAZON_URL = os.environ['AMAZON_URL']
+ES_HOST = os.environ['ELASTICSEARCH_URL']
 # es_host = "http://localhost:9201/"
 
-es = Elasticsearch([es_host]) 
+es = Elasticsearch([ES_HOST]) 
 
 request_timeout = 30
 upload_timeout = 30
@@ -364,6 +364,10 @@ async def upload_document(data):
     try:
         name= data['name']
         path = data['url']
+
+        if not path.startswith(AMAZON_URL):
+            path = AMAZON_URL + path
+
     except: return {'message' : f"Invalid key names in nodes_data"}
     
     try:
@@ -387,6 +391,7 @@ async def upload_document(data):
     default_image = data['default_image']
     filenames = data['filenames']
     id_dict = data['id_dict']
+    
     
     my_namespace = uuid.NAMESPACE_DNS  
 
