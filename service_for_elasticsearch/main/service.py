@@ -314,6 +314,9 @@ async def create_or_update():
         data_dict['color'] = request.json['color']
         data_dict['default_image'] = request.json['default_image']
         
+        if (not data_dict['default_image'].startswith(AMAZON_URL)) and (data_dict['default_image']):
+            data_dict['default_image'] = AMAZON_URL + data_dict['default_image']
+            
     except:
         abort(403, "Invalid raw data")
     
@@ -392,7 +395,7 @@ async def upload_document(data):
     filenames = data['filenames']
     id_dict = data['id_dict']
     
-    
+            
     my_namespace = uuid.NAMESPACE_DNS  
 
     my_uuid = uuid.uuid5(my_namespace, path + node_id)
@@ -614,17 +617,18 @@ async def delete_node():
     
     try:
         project_id = request.json['project_id']
-        node_id = request.json['node_id']
+        node_id = request.json.get('node_id', None)
     except:
         abort(403, "Invalid raw data")
         
     all_docs = await get_list()
-    file_ids = list(set([(item['doc_id'], item['path']) for item in all_docs.json['docs'] if (item['node_id'] == node_id) and (item['project_id'] == project_id)]))
+
+    file_ids = list(set([(item['doc_id'], item['path']) for item in all_docs.json['docs'] if ((item['node_id'] == node_id) or not node_id) and (item['project_id'] == project_id)]))
     
     if not file_ids:
         return {'message' : f"There's no document with {project_id} project_id and {node_id} node_id"}
-    
-    
+
+
     else: 
         delete_ids = [delete(doc_id[0], doc_id[1]) for doc_id in file_ids]
         return {"messages" : await asyncio.gather(*delete_ids)}
