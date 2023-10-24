@@ -314,8 +314,8 @@ async def create_or_update():
         data_dict['color'] = request.json['color']
         data_dict['default_image'] = request.json['default_image']
         
-        if (not data_dict['default_image'].startswith(AMAZON_URL)) and (data_dict['default_image']):
-            data_dict['default_image'] = AMAZON_URL + data_dict['default_image']
+        # if (not data_dict['default_image'].startswith(AMAZON_URL)) and (data_dict['default_image']):
+        #     data_dict['default_image'] = AMAZON_URL + data_dict['default_image']
             
     except:
         abort(403, "Invalid raw data")
