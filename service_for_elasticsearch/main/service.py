@@ -205,14 +205,10 @@ async def extract_text_from_ppt(ppt_file):
          
 async def extract_text_from_xlsx(xlsx_file):
     try:
-        xlsx_content = xlsx_file.read()
 
-        # Create a temporary XLSX file
-        temp_xlsx_file = tempfile.NamedTemporaryFile(suffix='.xlsx', delete=False)
-        temp_xlsx_file.write(xlsx_content)
-        temp_xlsx_path = temp_xlsx_file.name
+        temp_buffer = io.BytesIO(xlsx_file.read())
 
-        workbook = openpyxl.load_workbook(temp_xlsx_path)
+        workbook = openpyxl.load_workbook(temp_buffer)
         
         all_texts = []
         
@@ -229,7 +225,7 @@ async def extract_text_from_xlsx(xlsx_file):
             all_texts.append(sheet_name + ' ' + " ".join(row_str).strip())
 
         workbook.close()
-        temp_xlsx_file.close()
+        temp_buffer.close()
 
         return all_texts
     
@@ -240,14 +236,10 @@ import xlrd
 
 async def extract_text_from_xls(xls_file):
     try:
-        xls_content = xls_file.read()
-
-        # Create a temporary XLSX file
-        temp_xls_file = tempfile.NamedTemporaryFile(suffix='.xls', delete=False)
-        temp_xls_file.write(xls_content)
-        temp_xls_path = temp_xls_file.name
         
-        xls_workbook = xlrd.open_workbook(temp_xls_path)
+        temp_buffer = io.BytesIO(xls_file.read())
+        
+        xls_workbook = xlrd.open_workbook(file_contents=temp_buffer.read())
         
         all_texts = []
         
@@ -262,6 +254,7 @@ async def extract_text_from_xls(xls_file):
                 rows.append(" ".join(map(str, row)))
             
             all_texts.append(sheet_name + ' ' + " ".join(rows).strip())
+        
         
         return all_texts
     
@@ -313,7 +306,7 @@ async def create_or_update():
         data_dict['property_name'] = request.json['property']
         data_dict['color'] = request.json['color']
         data_dict['default_image'] = request.json['default_image']
-        
+                
         # if (not data_dict['default_image'].startswith(AMAZON_URL)) and (data_dict['default_image']):
         #     data_dict['default_image'] = AMAZON_URL + data_dict['default_image']
             
@@ -524,7 +517,7 @@ async def upload_document(data):
             es.index(index=INDEX, id = str(my_uuid), document=req)
             
             return {'message' : f"Invalid type of document", "URL" : path}
-            
+                
     except asyncio.TimeoutError:
         req = {
             "doc_id" : str(my_uuid),
