@@ -131,6 +131,8 @@ def get_context(output_stream, interpreter, all_texts, all_pages):
         output_stream.truncate(0)
 
 
+
+
 async def extract_text_from_pdf(pdf_file):
     
     print("start")
@@ -154,6 +156,10 @@ async def extract_text_from_pdf(pdf_file):
     return all_texts
 
 
+def create_doc(es, **kwargs):
+    
+    es.index(index=INDEX, id = kwargs['doc_id'], document=kwargs)
+    
 
 async def extract_text_from_doc(doc_file):
 
@@ -460,27 +466,8 @@ async def upload_document(data):
 
     try: 
         if not file:
-            req = {
-            "doc_id" : str(my_uuid),
-            "path" : path,
-            "project_id" : project_id,
-            "user_id" : user_id,
-            "node_id" : node_id,
-            "type_id" : type_id,
-            "property_id" : property_id,
-            "node_name" : node_name,
-            "type_name" : type_name,
-            "property_name" : property_name,
-            "color" : color,
-            "default_image" : default_image,
-            "filename" : name,
-            "page" : 0,
-            "page_content": "",
-            "created": str(gmt_plus_4_time_str),
-            }
-            
-
-            es.index(index=INDEX, id = str(my_uuid), document=req)
+            create_doc(es, doc_id = str(my_uuid), path = path, project_id = project_id, user_id = user_id, node_id = node_id, type_id = type_id, property_id = property_id, node_name = node_name, 
+                       type_name = type_name, property_name = property_name, color = color, default_image = default_image, filename = name, page = 0, page_content ="", created = str(gmt_plus_4_time_str))
             raise Exception
         
         if filename.endswith('.pdf'): texts = await asyncio.wait_for(extract_text_from_pdf(pdf_file=file), upload_timeout - request_time)
@@ -494,113 +481,42 @@ async def upload_document(data):
         elif filename.endswith('.xls') : texts = await asyncio.wait_for(extract_text_from_xls(xls_file=file), upload_timeout - request_time)
         
         else: 
-            req = {
-                "doc_id" : str(my_uuid),
-                "path" : path,
-                "project_id" : project_id,
-                "user_id" : user_id,
-                "node_id" : node_id,
-                "type_id" : type_id,
-                "property_id" : property_id,
-                "node_name" : node_name,
-                "type_name" : type_name,
-                "property_name" : property_name,
-                "color" : color,
-                "default_image" : default_image,
-                "filename" : name,
-                "page" : 0,
-                "page_content": "",
-                "created": str(gmt_plus_4_time_str),
-            }
-        
-
-            es.index(index=INDEX, id = str(my_uuid), document=req)
+            create_doc(es, doc_id = str(my_uuid), path = path, project_id = project_id, user_id = user_id, node_id = node_id, type_id = type_id, property_id = property_id, node_name = node_name, 
+                       type_name = type_name, property_name = property_name, color = color, default_image = default_image, filename = name, page = 0, page_content ="", created = str(gmt_plus_4_time_str))
             
             return {'message' : f"Invalid type of document", "URL" : path}
                 
     except asyncio.TimeoutError:
-        req = {
-            "doc_id" : str(my_uuid),
-            "path" : path,
-            "project_id" : project_id,
-            "user_id" : user_id,
-            "node_id" : node_id,
-            "type_id" : type_id,
-            "property_id" : property_id,
-            "node_name" : node_name,
-            "type_name" : type_name,
-            "property_name" : property_name,
-            "color" : color,
-            "default_image" : default_image,
-            "filename" : name,
-            "page" : 0,
-            "page_content": "",
-            "created": str(gmt_plus_4_time_str),
-        }
-        
-
-        es.index(index=INDEX, id = str(my_uuid), document=req)
+        create_doc(es, doc_id = str(my_uuid), path = path, project_id = project_id, user_id = user_id, node_id = node_id, type_id = type_id, property_id = property_id, node_name = node_name, 
+                       type_name = type_name, property_name = property_name, color = color, default_image = default_image, filename = name, page = 0, page_content ="", created = str(gmt_plus_4_time_str))
         
         return {'message' : f"Document reading timeout", "URL" : path}
     
     except Exception as e:
-        req = {
-            "doc_id" : str(my_uuid),
-            "path" : path,
-            "project_id" : project_id,
-            "user_id" : user_id,
-            "node_id" : node_id,
-            "type_id" : type_id,
-            "property_id" : property_id,
-            "node_name" : node_name,
-            "type_name" : type_name,
-            "property_name" : property_name,
-            "color" : color,
-            "default_image" : default_image,
-            "filename" : name,
-            "page" : 0,
-            "page_content": "",
-            "created": str(gmt_plus_4_time_str),
-        }
+        create_doc(es, doc_id = str(my_uuid), path = path, project_id = project_id, user_id = user_id, node_id = node_id, type_id = type_id, property_id = property_id, node_name = node_name, 
+                       type_name = type_name, property_name = property_name, color = color, default_image = default_image, filename = name, page = 0, page_content ="", created = str(gmt_plus_4_time_str))
         
-
-        es.index(index=INDEX, id = str(my_uuid), document=req)
         return {'message' : "Failed to read document", "URL" : path}
         
     finally:
         if file:
             file.close()
-    
-    for page_num, page_content in enumerate(texts):
-        
-        current_utc_time = datetime.utcnow()
-        gmt_plus_4_time = current_utc_time.replace(tzinfo=pytz.utc).astimezone(gmt_plus_4)
+            
+    if texts:
+        for page_num, page_content in enumerate(texts):
+            
+            current_utc_time = datetime.utcnow()
+            gmt_plus_4_time = current_utc_time.replace(tzinfo=pytz.utc).astimezone(gmt_plus_4)
 
-        gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
-        
-        # Print the page number and text content to the console
-        req = {
-            "doc_id" : str(my_uuid),
-            "path" : path,
-            "project_id" : project_id,
-            "user_id" : user_id,
-            "node_id" : node_id,
-            "type_id" : type_id,
-            "property_id" : property_id,
-            "node_name" : node_name,
-            "type_name" : type_name,
-            "property_name" : property_name,
-            "color" : color,
-            "default_image" : default_image,
-            "filename" : name,
-            "page" : page_num + 1,
-            "page_content": page_content,
-            "created": str(gmt_plus_4_time_str),
-        }
-        
-
-        es.index(index=INDEX, id = str(my_uuid) + str(page_num), document=req)
-        
+            gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
+            
+            # Print the page number and text content to the console
+            create_doc(es, doc_id = str(my_uuid), path = path, project_id = project_id, user_id = user_id, node_id = node_id, type_id = type_id, property_id = property_id, node_name = node_name, 
+                       type_name = type_name, property_name = property_name, color = color, default_image = default_image, filename = name, page = page_num + 1, page_content = page_content, created = str(gmt_plus_4_time_str))
+            
+    else:
+            create_doc(es, doc_id = str(my_uuid), path = path, project_id = project_id, user_id = user_id, node_id = node_id, type_id = type_id, property_id = property_id, node_name = node_name, 
+                       type_name = type_name, property_name = property_name, color = color, default_image = default_image, filename = name, page = 0, page_content ="", created = str(gmt_plus_4_time_str))
     
     return {'message' : f"Document was created in database", "URL" : path}
     
