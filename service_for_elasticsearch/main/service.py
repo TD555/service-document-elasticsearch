@@ -641,6 +641,8 @@ async def delete_node():
     try:
         project_id = request.json["project_id"]
         node_id = request.json.get("node_id", None)
+        property_id = request.json.get("property_id", None)
+        
     except:
         abort(403, "Invalid raw data")
 
@@ -651,7 +653,7 @@ async def delete_node():
             [
                 (item["doc_id"], item["path"])
                 for item in all_docs.json["docs"]
-                if ((item["node_id"] == node_id) or not node_id)
+                if ((item["property_id"] == property_id) or not node_id) and ((item["node_id"] == node_id) or not node_id)
                 and (item["project_id"] == project_id)
             ]
         )
@@ -659,13 +661,13 @@ async def delete_node():
 
     if not file_ids:
         return {
-            "message": f"There's no document with {project_id} project_id and {node_id} node_id"
+            "message": f"No document exists to be deleted."
         }
 
     else:
         delete_ids = [delete(doc_id[0], doc_id[1]) for doc_id in file_ids]
         return {"messages": await asyncio.gather(*delete_ids)}
-
+    
 
 @app.route("/search", methods=["POST"])
 def get_page():
@@ -1082,6 +1084,7 @@ async def get_list():
                 "doc_id": hit["_source"]["doc_id"],
                 "type_id": hit["_source"]["type_id"],
                 "type_name": hit["_source"]["type_name"],
+                "property_id": hit["_source"]["property_id"],
                 "property_name": hit["_source"]["property_name"],
                 "page": hit["_source"]["page"],
                 "page_content": hit["_source"]["page_content"],
