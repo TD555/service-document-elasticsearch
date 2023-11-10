@@ -653,7 +653,7 @@ async def delete_node():
             [
                 (item["doc_id"], item["path"])
                 for item in all_docs.json["docs"]
-                if ((item["property_id"] == property_id) or not node_id) and ((item["node_id"] == node_id) or not node_id)
+                if ((item["property_id"] == property_id) or not property_id) and ((item["node_id"] == node_id) or not node_id)
                 and (item["project_id"] == project_id)
             ]
         )
