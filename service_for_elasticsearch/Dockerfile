@@ -1,11 +1,11 @@
 FROM python:3.8.10
 
-# RUN rm -rf /var/lib/apt/lists/* &&  apt-get update && \
-#     apt-get install -yf unoconv libreoffice --no-install-recommends
+RUN rm -rf /var/lib/apt/lists/* &&  apt-get update && \
+    apt-get install -yf unoconv libreoffice --no-install-recommends
 
-# RUN cp /usr/bin/unoconv /usr/local/bin/unoconv
+RUN cp /usr/bin/unoconv /usr/local/bin/unoconv
 
-# RUN sed -i 's|#!/usr/bin/env python3|#!/usr/bin/python3|' /usr/local/bin/unoconv
+RUN sed -i 's|#!/usr/bin/env python3|#!/usr/bin/python3|' /usr/local/bin/unoconv
 
 RUN adduser --disabled-login service-elasticsearch
 USER service-elasticsearch
