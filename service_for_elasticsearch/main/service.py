@@ -148,7 +148,7 @@ async def extract_text_from_pdf(pdf_file):
 
 
 def create_doc(es, **kwargs):
-    es.index(index=INDEX, id=kwargs["doc_id"], document=kwargs)
+    es.index(index=INDEX, id=kwargs["doc_id"] + str(kwargs["page"]), document=kwargs)
 
 
 async def extract_text_from_doc(doc_file):
