@@ -292,7 +292,7 @@ async def create_or_update():
     for item in all_docs.json["docs"]:
         if item["node_id"] == data_dict["node_id"]:
             id_dict["doc_ids"][item["path"]].append(
-                item["doc_id"] + str(item["page"] - 1)
+                item["doc_id"] + str(item["page"])
             )
             id_dict["source"] = {
                 "node_name": item["node_name"],
@@ -414,6 +414,7 @@ async def upload_document(data):
                 for item in failed:
                     print(f"Failed to update document with ID {item['_id']}")
 
+            else: return {"message": f"Document is updated.", "URL": path}
         return {"message": f"Document already exists in database.", "URL": path}
 
     #         main_prompt = f"""Get neo4j schema with relationships from current text - '{content}' """
