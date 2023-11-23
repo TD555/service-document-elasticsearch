@@ -15,10 +15,7 @@ import openpyxl
 import xlrd
 import subprocess
 
-from pdfminer.converter import TextConverter
-from pdfminer.pdfinterp import PDFPageInterpreter
-from pdfminer.pdfinterp import PDFResourceManager
-from pdfminer.pdfpage import PDFPage
+import fitz
 import os
 import re
 import io
@@ -108,42 +105,26 @@ def remove_duplicates(input_list):
     return unique_list
 
 
-def get_context(output_stream, interpreter, all_texts, all_pages):
-    for page in all_pages:
-        interpreter.process_page(page)
-
-        text = output_stream.getvalue()
-
-        print(text)
-        # do something with the text for this page
-        text = text.replace("\n", " ")
-        all_texts.append(text)
-
-        # reset the output stream
-        output_stream.seek(0)
-        output_stream.truncate(0)
-
-
 async def extract_text_from_pdf(pdf_file):
-    print("start")
-    # create a PDF resource manager and converter
-    resource_manager = PDFResourceManager()
-    output_stream = io.StringIO()
-    converter = TextConverter(resource_manager, output_stream, laparams=None)
-    # create a PDF interpreter and open the PDF file
-    interpreter = PDFPageInterpreter(resource_manager, converter)
+    
     all_texts = []
-    # iterate over each page in the PDF file
-    all_pages = PDFPage.get_pages(pdf_file)
+    pdf_document = fitz.open("pdf", pdf_file.read())
 
-    await asyncio.get_event_loop().run_in_executor(
-        None, get_context, output_stream, interpreter, all_texts, all_pages
-    )
+    # Iterate through each page
+    for page_num in range(pdf_document.page_count):
+        page = pdf_document.load_page(page_num)
+        
+        # Extract text from the page
+        text = page.get_text("text")
+        
+        text = text.replace("\n", " ")
+        clean_text = re.sub(r'\s+', ' ', text)
 
-    # cleanup
-    converter.close()
-    output_stream.close()
+        all_texts.append(clean_text)
 
+    # Close the PDF document
+    pdf_document.close()
+        
     return all_texts
 
 
@@ -311,7 +292,7 @@ async def create_or_update():
     for item in all_docs.json["docs"]:
         if item["node_id"] == data_dict["node_id"]:
             id_dict["doc_ids"][item["path"]].append(
-                item["doc_id"] + str(item["page"] - 1)
+                item["doc_id"] + str(item["page"])
             )
             id_dict["source"] = {
                 "node_name": item["node_name"],
@@ -433,6 +414,7 @@ async def upload_document(data):
                 for item in failed:
                     print(f"Failed to update document with ID {item['_id']}")
 
+            else: return {"message": f"Document is updated.", "URL": path}
         return {"message": f"Document already exists in database.", "URL": path}
 
     #         main_prompt = f"""Get neo4j schema with relationships from current text - '{content}' """
@@ -668,55 +650,7 @@ async def delete_node():
         delete_ids = [delete(doc_id[0], doc_id[1]) for doc_id in file_ids]
         return {"messages": await asyncio.gather(*delete_ids)}
     
-
-@app.route("/search", methods=["POST"])
-def get_page():
-    try:
-        keyword = request.json["search"]
-        page = request.json["page"]
-        project_id = request.json["project_id"]
-        list_type_id = request.json["list_type_id"]
-        limit = request.json["limit"]
-        sortOrder = request.json["sortOrder"]
-        sortField = request.json["sortField"]
-
-    except:
-        abort(403, "Invalid raw data")
-
-    if len(keyword.strip()) < 3:
-        abort(422, "Search terms must contain at least 3 characters")
-
-    scroll_size = limit  # Number of documents to retrieve in each scroll request
-    scroll_timeout = "1m"  # Time interval to keep the search context alive
-    special_characters = [
-        "\\",
-        "+",
-        "-",
-        "=",
-        "&&",
-        "||",
-        ">",
-        "<",
-        "!",
-        "(",
-        ")",
-        "{",
-        "}",
-        "[",
-        "]",
-        "^",
-        '"',
-        "~",
-        "*",
-        "?",
-        ":",
-        "/",
-    ]
-
-    for character in special_characters:
-        keyword = keyword.replace(character, "\\" + character)
-        # print(keyword)
-
+def initialize_queries(keyword):
     query1 = {
         "query": {
             "bool": {
@@ -822,6 +756,110 @@ def get_page():
         ],
     }
 
+    return query1, query2
+
+
+def sentence_search(keywords, query, method, scroll_timeout, scroll_size):
+    for splited_text in keywords:
+            
+        if method == "regexp":
+            query["query"]["bool"]["must"][0]["span_near"]["clauses"].append(
+                {
+                    "span_multi": {
+                        "match": {
+                            "regexp": {
+                                "page_content": {
+                                    "value": f".*{splited_text.strip().lower()}.*",
+                                    "flags": "ALL"
+                                }
+                            },
+                        }
+                    }
+                }
+            )
+        elif method == "fuzzy":
+            query["query"]["bool"]["must"][0]["span_near"]["clauses"].append(
+                {
+                    "span_multi": {
+                        "match": {
+                            "fuzzy": {
+                                "page_content": {
+                                    "value": splited_text.strip().lower(),
+                                    "fuzziness" : "AUTO"
+                                }
+                            },
+                        }
+                    }
+                }
+            )
+    try:
+        result = es.search(
+            index=INDEX, body=query, scroll=scroll_timeout, size=scroll_size
+        )
+
+    except ConnectionError:
+        abort(408, "Elasticsearch : Connection Timeout error")
+
+    except Exception as e:
+        abort(500, str(e))
+
+    hits = result["hits"]["hits"]
+    
+    return result, hits
+    
+
+@app.route("/search", methods=["POST"])
+def get_page():
+    try:
+        keyword = request.json["search"]
+        page = request.json["page"]
+        project_id = request.json["project_id"]
+        list_type_id = request.json["list_type_id"]
+        limit = request.json["limit"]
+        sortOrder = request.json["sortOrder"]
+        sortField = request.json["sortField"]
+
+    except:
+        abort(403, "Invalid raw data")
+
+    if len(keyword.strip()) < 3:
+        abort(422, "Search terms must contain at least 3 characters")
+
+    scroll_size = limit  # Number of documents to retrieve in each scroll request
+    scroll_timeout = "1m"  # Time interval to keep the search context alive
+    special_characters = [
+        "\\",
+        "+",
+        "-",
+        "=",
+        "&&",
+        "||",
+        ">",
+        "<",
+        "!",
+        "(",
+        ")",
+        "{",
+        "}",
+        "[",
+        "]",
+        "^",
+        '"',
+        "~",
+        "*",
+        "?",
+        ":",
+        "/",
+    ]
+
+    for character in special_characters:
+        keyword = keyword.replace(character, "\\" + character)
+        # print(keyword)
+
+    keywords = keyword.strip().split()
+    
+    query1, query2 = initialize_queries(keyword)
+    
     if not re.match(r".*[ +].*", keyword.strip()):
         try:
             result = es.search(
@@ -836,39 +874,9 @@ def get_page():
             abort(500, str(e))
 
         hits = result["hits"]["hits"]
-        # print(hits)
 
     else:
-        for splited_text in keyword.strip().split():
-            print(splited_text.strip())
-            query2["query"]["bool"]["must"][0]["span_near"]["clauses"].append(
-                {
-                    "span_multi": {
-                        "match": {
-                            "fuzzy": {
-                                "page_content": {
-                                    "value": splited_text.strip(),
-                                    "fuzziness": 2,
-                                }
-                            },
-                        }
-                    }
-                }
-            )
-
-        # search for documents in the index and get only the ids
-        try:
-            result = es.search(
-                index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
-            )
-
-        except ConnectionError:
-            abort(408, "Elasticsearch : Connection Timeout error")
-
-        except Exception as e:
-            abort(500, str(e))
-
-        hits = result["hits"]["hits"]
+        result, hits = sentence_search(keywords, query2, "regexp", scroll_timeout, scroll_size)
 
         if not hits:
             try:
@@ -881,34 +889,54 @@ def get_page():
 
             except Exception as e:
                 abort(500, str(e))
+                
             hits = result["hits"]["hits"]
-
+         
             if not hits:
-                try:
-                    keyword = keyword.replace(" ", "")
-                    query1["query"]["bool"]["should"][0]["match"]["page_content"][
-                        "query"
-                    ] = keyword
-                    query1["query"]["bool"]["should"][1]["query_string"]["query"] = (
-                        "*" + keyword + "*"
-                    )
-                    query1["query"]["bool"]["should"][2]["match"]["filename"][
-                        "query"
-                    ] = keyword
 
-                    result = es.search(
-                        index=INDEX,
-                        body=query1,
-                        scroll=scroll_timeout,
-                        size=scroll_size,
-                    )
+                query1, query2 = initialize_queries(keyword)
+                
+                result, hits = sentence_search(keywords, query2, "fuzzy", scroll_timeout, scroll_size)
+
+                if not hits:
+                    try:
+                        query2["query"]["bool"]["must"][0]["span_near"]["in_order"] = "false"
+                        result = es.search(
+                            index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
+                        )
+                    except ConnectionError:
+                        abort(408, "Elasticsearch : Connection Timeout error")
+
+                    except Exception as e:
+                        abort(500, str(e))
+                        
                     hits = result["hits"]["hits"]
-                    # print(hits)
-                except ConnectionError:
-                    abort(408, "Elasticsearch : Connection Timeout error")
+                    
+                    if not hits:
+                        try:
+                            keyword = keyword.replace(" ", "")
+                            query1["query"]["bool"]["should"][0]["match"]["page_content"][
+                                "query"
+                            ] = keyword
+                            query1["query"]["bool"]["should"][1]["query_string"]["query"] = (
+                                "*" + keyword + "*"
+                            )
+                            query1["query"]["bool"]["should"][2]["match"]["filename"][
+                                "query"
+                            ] = keyword
 
-                except Exception as e:
-                    abort(500, str(e))
+                            result = es.search(
+                                index=INDEX,
+                                body=query1,
+                                scroll=scroll_timeout,
+                                size=scroll_size,
+                            )
+                            hits = result["hits"]["hits"]
+                        except ConnectionError:
+                            abort(408, "Elasticsearch : Connection Timeout error")
+
+                        except Exception as e:
+                            abort(500, str(e))
 
     sentences = {}
     while hits:
