@@ -5,6 +5,8 @@ Scripts/
 pyvenv.cfg
 test.ipynb
 share/
+svo.ipynb
+# matcher.ipynb
 .vscode/
 service_for_elasticsearch/testing
 service_for_elasticsearch/main/preprocess.py
