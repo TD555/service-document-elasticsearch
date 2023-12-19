@@ -28,18 +28,11 @@ from rapidfuzz import fuzz
 from version import __version__, __description__
 import sys
 sys.path.append("service_for_elasticsearch")
+
 from configs.config import Config
 
 app = Flask(__name__)
 
-# API_KEY = "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"
-# MODEL = "gpt-3.5-turbo"
-
-# URL = "http://192.168.0.176:5000"
-
-# ES_INDEX = os.environ["ELASTICSEARCH_INDEX"]
-# AMAZON_URL = os.environ["AMAZON_URL"]
-# ES_HOST = os.environ["ELASTICSEARCH_URL"]
 
 # DATABASE_HOST = 'localhost'
 # DATABASE_NAME = 'araks_db'
@@ -47,9 +40,15 @@ app = Flask(__name__)
 # DATABASE_PASSWORD = 'Tik.555'
 # DATABASE_PORT = 5432
 
-ES_INDEX = "araks_index"
-AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-ES_HOST = "http://localhost:9201/"
+# ES_INDEX = "araks_index"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
+
+
+ES_INDEX = os.environ["ELASTICSEARCH_INDEX"]
+AMAZON_URL = os.environ["AMAZON_URL"]
+ES_HOST = os.environ["ELASTICSEARCH_URL"]
+
 
 DATABASE_HOST = Config.DATABASE_HOST
 DATABASE_NAME = Config.DATABASE_NAME
