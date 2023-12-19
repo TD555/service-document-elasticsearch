@@ -12,4 +12,4 @@ REBEL.ipynb
 service_for_elasticsearch/testing
 service_for_elasticsearch/main/preprocess.py
 service_for_elasticsearch/GUI
-service_for_elasticsearch/configs/.env
+# service_for_elasticsearch/configs/.env
