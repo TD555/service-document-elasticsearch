@@ -1,4 +1,4 @@
-from flask import Flask, jsonify, request, json, abort, render_template
+from flask import Flask, jsonify, request, json, abort, make_response
 from elasticsearch import Elasticsearch, ConnectionError, BadRequestError, exceptions
 from elasticsearch.helpers import bulk
 import asyncio
@@ -19,8 +19,16 @@ import fitz
 import os
 import re
 import io
+from collections import defaultdict
+import math
+
+import psycopg2 as ps
+from rapidfuzz import fuzz
 
 from version import __version__, __description__
+import sys
+sys.path.append("service_for_elasticsearch")
+from configs.config import Config
 
 app = Flask(__name__)
 
@@ -29,13 +37,25 @@ app = Flask(__name__)
 
 # URL = "http://192.168.0.176:5000"
 
-# INDEX = "araks_index"
-# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-# ES_HOST = "http://localhost:9201/"
+# ES_INDEX = os.environ["ELASTICSEARCH_INDEX"]
+# AMAZON_URL = os.environ["AMAZON_URL"]
+# ES_HOST = os.environ["ELASTICSEARCH_URL"]
 
-INDEX = os.environ["INDEX"]
-AMAZON_URL = os.environ["AMAZON_URL"]
-ES_HOST = os.environ["ELASTICSEARCH_URL"]
+# DATABASE_HOST = 'localhost'
+# DATABASE_NAME = 'araks_db'
+# DATABASE_USER = 'postgres'
+# DATABASE_PASSWORD = 'Tik.555'
+# DATABASE_PORT = 5432
+
+ES_INDEX = "araks_index"
+AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+ES_HOST = "http://localhost:9201/"
+
+DATABASE_HOST = Config.DATABASE_HOST
+DATABASE_NAME = Config.DATABASE_NAME
+DATABASE_USER = Config.DATABASE_USER
+DATABASE_PASSWORD = Config.DATABASE_PASSWORD
+DATABASE_PORT = Config.DATABASE_PORT
 
 es = Elasticsearch([ES_HOST])
 
@@ -63,7 +83,7 @@ put_data = {
 
 
 try:
-    es.indices.create(index=INDEX, body=put_data)
+    es.indices.create(index=ES_INDEX, body=put_data)
 
 except BadRequestError as e:
     # print(str(e))
@@ -73,7 +93,7 @@ except BadRequestError as e:
 settings = {"highlight.max_analyzed_offset": 10000000}
 
 try:
-    es.indices.put_settings(index=INDEX, settings=settings)
+    es.indices.put_settings(index=ES_INDEX, settings=settings)
     OFFSET = 10000000
 except BadRequestError as e:
     # print(str(e))
@@ -106,17 +126,17 @@ def remove_duplicates(input_list):
 
 
 async def extract_text_from_pdf(pdf_file):
-    
+
     all_texts = []
     pdf_document = fitz.open("pdf", pdf_file.read())
 
     # Iterate through each page
     for page_num in range(pdf_document.page_count):
         page = pdf_document.load_page(page_num)
-        
+
         # Extract text from the page
         text = page.get_text("text")
-        
+
         text = text.replace("\n", " ")
         clean_text = re.sub(r'\s+', ' ', text)
 
@@ -124,12 +144,13 @@ async def extract_text_from_pdf(pdf_file):
 
     # Close the PDF document
     pdf_document.close()
-        
+
     return all_texts
 
 
 def create_doc(es, **kwargs):
-    es.index(index=INDEX, id=kwargs["doc_id"] + str(kwargs["page"]), document=kwargs)
+    es.index(index=ES_INDEX, id=kwargs["doc_id"] +
+             str(kwargs["page"]), document=kwargs)
 
 
 async def extract_text_from_doc(doc_file):
@@ -196,7 +217,7 @@ async def extract_text_from_xlsx(xlsx_file):
             row_str = []
             # Loop through each row in the sheet
             for row in sheet.iter_rows(values_only=True):
-                print(row)
+                # print(row)
                 row_str.append(" ".join(map(str, row)))
 
                 # Print the formatted row
@@ -246,14 +267,16 @@ def handle_error(error):
         status_code = error.code
     else:
         status_code = 500
-    return {"message": str(error), "status_code": status_code}, status_code
+    return {"message": str(error).strip(), "status_code": status_code}, status_code
 
 
 @app.after_request
 def after_request(response):
     response.headers.set("Access-Control-Allow-Origin", "*")
-    response.headers.set("Access-Control-Allow-Headers", "Content-Type,Authorization")
-    response.headers.set("Access-Control-Allow-Methods", "GET,PUT,POST,DELETE,OPTIONS")
+    response.headers.set("Access-Control-Allow-Headers",
+                         "Content-Type,Authorization")
+    response.headers.set("Access-Control-Allow-Methods",
+                         "GET,PUT,POST,DELETE,OPTIONS")
     return response
 
 
@@ -294,7 +317,7 @@ async def create_or_update():
             id_dict["doc_ids"][item["path"]].append(
                 item["doc_id"] + str(item["page"])
             )
-            id_dict["source"] = {
+            id_dict["source"] = {  # type: ignore
                 "node_name": item["node_name"],
                 "type_name": item["type_name"],
                 "property_name": item["property_name"],
@@ -375,7 +398,8 @@ async def upload_document(data):
     filename = os.path.basename(path)
 
     current_utc_time = datetime.utcnow()
-    gmt_plus_4_time = current_utc_time.replace(tzinfo=pytz.utc).astimezone(gmt_plus_4)
+    gmt_plus_4_time = current_utc_time.replace(
+        tzinfo=pytz.utc).astimezone(gmt_plus_4)
 
     gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
 
@@ -390,7 +414,7 @@ async def upload_document(data):
                 "color": color,
             }
         }
-        print(id_dict["source"], update_request["doc"])
+
         if id_dict["source"] != update_request["doc"]:
             # Update documents
             update_actions = []
@@ -400,7 +424,7 @@ async def upload_document(data):
                 update_actions.append(
                     {
                         "_op_type": "update",  # Specify the operation type
-                        "_index": INDEX,
+                        "_index": ES_INDEX,
                         "_id": doc_id,
                         "_source": update_request,  # Provide the update request for each document
                     }
@@ -414,7 +438,8 @@ async def upload_document(data):
                 for item in failed:
                     print(f"Failed to update document with ID {item['_id']}")
 
-            else: return {"message": f"Document is updated.", "URL": path}
+            else:
+                return {"message": f"Document is updated.", "URL": path}
         return {"message": f"Document already exists in database.", "URL": path}
 
     #         main_prompt = f"""Get neo4j schema with relationships from current text - '{content}' """
@@ -463,7 +488,8 @@ async def upload_document(data):
 
         if filename.endswith(".pdf"):
             texts = await asyncio.wait_for(
-                extract_text_from_pdf(pdf_file=file), upload_timeout - request_time
+                extract_text_from_pdf(
+                    pdf_file=file), upload_timeout - request_time
             )
 
         elif (
@@ -473,22 +499,26 @@ async def upload_document(data):
             or filename.endswith(".document")
         ):
             texts = await asyncio.wait_for(
-                extract_text_from_doc(doc_file=file), upload_timeout - request_time
+                extract_text_from_doc(
+                    doc_file=file), upload_timeout - request_time
             )
 
         elif filename.endswith(".pptx") or filename.endswith(".ppt"):
             texts = await asyncio.wait_for(
-                extract_text_from_ppt(ppt_file=file), upload_timeout - request_time
+                extract_text_from_ppt(
+                    ppt_file=file), upload_timeout - request_time
             )
 
         elif filename.endswith(".xlsx"):
             texts = await asyncio.wait_for(
-                extract_text_from_xlsx(xlsx_file=file), upload_timeout - request_time
+                extract_text_from_xlsx(
+                    xlsx_file=file), upload_timeout - request_time
             )
 
         elif filename.endswith(".xls"):
             texts = await asyncio.wait_for(
-                extract_text_from_xls(xls_file=file), upload_timeout - request_time
+                extract_text_from_xls(
+                    xls_file=file), upload_timeout - request_time
             )
 
         else:
@@ -624,7 +654,7 @@ async def delete_node():
         project_id = request.json["project_id"]
         node_id = request.json.get("node_id", None)
         property_id = request.json.get("property_id", None)
-        
+
     except:
         abort(403, "Invalid raw data")
 
@@ -649,7 +679,8 @@ async def delete_node():
     else:
         delete_ids = [delete(doc_id[0], doc_id[1]) for doc_id in file_ids]
         return {"messages": await asyncio.gather(*delete_ids)}
-    
+
+
 def initialize_queries(keyword):
     query1 = {
         "query": {
@@ -761,7 +792,7 @@ def initialize_queries(keyword):
 
 def sentence_search(keywords, query, method, scroll_timeout, scroll_size):
     for splited_text in keywords:
-            
+
         if method == "regexp":
             query["query"]["bool"]["must"][0]["span_near"]["clauses"].append(
                 {
@@ -785,7 +816,7 @@ def sentence_search(keywords, query, method, scroll_timeout, scroll_size):
                             "fuzzy": {
                                 "page_content": {
                                     "value": splited_text.strip().lower(),
-                                    "fuzziness" : "AUTO"
+                                    "fuzziness": "AUTO"
                                 }
                             },
                         }
@@ -794,7 +825,7 @@ def sentence_search(keywords, query, method, scroll_timeout, scroll_size):
             )
     try:
         result = es.search(
-            index=INDEX, body=query, scroll=scroll_timeout, size=scroll_size
+            index=ES_INDEX, body=query, scroll=scroll_timeout, size=scroll_size
         )
 
     except ConnectionError:
@@ -804,9 +835,9 @@ def sentence_search(keywords, query, method, scroll_timeout, scroll_size):
         abort(500, str(e))
 
     hits = result["hits"]["hits"]
-    
+
     return result, hits
-    
+
 
 @app.route("/search", methods=["POST"])
 def get_page():
@@ -854,18 +885,16 @@ def get_page():
 
     for character in special_characters:
         keyword = keyword.replace(character, "\\" + character)
-        # print(keyword)
 
     keywords = keyword.strip().split()
-    
+
     query1, query2 = initialize_queries(keyword)
-    
+
     if not re.match(r".*[ +].*", keyword.strip()):
         try:
             result = es.search(
-                index=INDEX, body=query1, scroll=scroll_timeout, size=scroll_size
+                index=ES_INDEX, body=query1, scroll=scroll_timeout, size=scroll_size
             )
-            # print(result)
 
         except ConnectionError:
             abort(408, "Elasticsearch : Connection Timeout error")
@@ -876,42 +905,44 @@ def get_page():
         hits = result["hits"]["hits"]
 
     else:
-        result, hits = sentence_search(keywords, query2, "regexp", scroll_timeout, scroll_size)
+        result, hits = sentence_search(
+            keywords, query2, "regexp", scroll_timeout, scroll_size)
 
         if not hits:
             try:
                 query2["query"]["bool"]["must"][0]["span_near"]["in_order"] = "false"
                 result = es.search(
-                    index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
+                    index=ES_INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
                 )
             except ConnectionError:
                 abort(408, "Elasticsearch : Connection Timeout error")
 
             except Exception as e:
                 abort(500, str(e))
-                
+
             hits = result["hits"]["hits"]
-         
+
             if not hits:
 
                 query1, query2 = initialize_queries(keyword)
-                
-                result, hits = sentence_search(keywords, query2, "fuzzy", scroll_timeout, scroll_size)
+
+                result, hits = sentence_search(
+                    keywords, query2, "fuzzy", scroll_timeout, scroll_size)
 
                 if not hits:
                     try:
                         query2["query"]["bool"]["must"][0]["span_near"]["in_order"] = "false"
                         result = es.search(
-                            index=INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
+                            index=ES_INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
                         )
                     except ConnectionError:
                         abort(408, "Elasticsearch : Connection Timeout error")
 
                     except Exception as e:
                         abort(500, str(e))
-                        
+
                     hits = result["hits"]["hits"]
-                    
+
                     if not hits:
                         try:
                             keyword = keyword.replace(" ", "")
@@ -926,7 +957,7 @@ def get_page():
                             ] = keyword
 
                             result = es.search(
-                                index=INDEX,
+                                index=ES_INDEX,
                                 body=query1,
                                 scroll=scroll_timeout,
                                 size=scroll_size,
@@ -942,13 +973,11 @@ def get_page():
     while hits:
         # Scroll to the next batch of results
         for hit in hits:
-            # print(hit['highlight'].get('page_content'))
             if (
                 "highlight" in hit.keys()
                 and hit["_source"]["project_id"] == project_id
                 and (hit["_source"]["type_id"] in list_type_id or not list_type_id)
             ):
-                # print(hit['_score'], hit['highlight'].get('page_content', ['']))
                 if (
                     hit["_source"]["path"],
                     hit["_source"]["node_id"],
@@ -1008,7 +1037,6 @@ def get_page():
                         (hit["_source"]["path"], hit["_source"]["node_id"])
                     ]
                 ):
-                    # print(hit['highlight'].get('page_content', [''])[0])
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
                         "match_content"
                     ] = (hit["highlight"].get("page_content", [""])[0].strip())
@@ -1016,8 +1044,7 @@ def get_page():
                         "page"
                     ] = hit["_source"]["page"]
                 for content in hit["highlight"].get("page_content", []):
-                    # print("content - ", content)
-                    print(re.findall(r"<em>(.*?)</em>", content))
+                    # print(re.findall(r"<em>(.*?)</em>", content))
                     sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
                         "match_count"
                     ] += int(len(re.findall(r"<em>(.*?)</em>", content)))
@@ -1031,7 +1058,6 @@ def get_page():
         hits = result["hits"]["hits"]
 
     rows = []
-    # print(sentences.keys())
     for url, item in sentences.items():
         new_dict = defaultdict()
         item["path"] = url[0]
@@ -1050,7 +1076,7 @@ def get_page():
         for key in keys:
             new_dict[key] = item[key]
             del item[key]
-        # print(dict(item))
+
         if new_dict["node_id"] not in [row["node_id"] for row in rows]:
             new_dict["updated"] = item["created"]
             new_dict["data"] = [item]
@@ -1077,7 +1103,7 @@ def get_page():
 
     return jsonify(
         {
-            "rows": rows[limit * (page - 1) : limit * page],
+            "rows": rows[limit * (page - 1): limit * page],
             "count": len(rows),
             "status": 200,
         }
@@ -1091,8 +1117,9 @@ async def get_list():
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
     try:
         while True:
-            if es.indices.exists(index=INDEX):
-                initial_search = es.search(index=INDEX, body=query, scroll="1m")
+            if es.indices.exists(index=ES_INDEX):
+                initial_search = es.search(
+                    index=ES_INDEX, body=query, scroll="1m")
                 break
             else:
                 time.sleep(1)
@@ -1145,8 +1172,8 @@ async def delete(document_id, path):
     query = {"query": {"match": {"doc_id": document_id}}}
 
     # Use the delete_by_query API to delete all documents that match the query
-    response = es.delete_by_query(index=INDEX, body=query)
-    # print(response)
+    response = es.delete_by_query(index=ES_INDEX, body=query)
+
     if response["deleted"]:
         return {"message": "Document was deleted from database.", "URL": path}
     else:
@@ -1157,7 +1184,7 @@ async def delete(document_id, path):
 async def clean():
     query = {"query": {"match_all": {}}}
 
-    if es.delete_by_query(index=INDEX, body=query)["deleted"]:
+    if es.delete_by_query(index=ES_INDEX, body=query)["deleted"]:
         return jsonify(
             {
                 "message": f"Elasticsearch database has cleaned successfully.",
@@ -1235,7 +1262,8 @@ async def get_scheme():
     relations = sort_dict(
         get_count(
             [
-                data["source"] + " -> " + data["name"] + " -> " + data["target"]
+                data["source"] + " -> " +
+                data["name"] + " -> " + data["target"]
                 for data in scheme_data["edges"]
             ]
         )
@@ -1250,7 +1278,8 @@ async def get_scheme():
     ]
     most_nodes = sort_dict(
         get_count(
-            [item["source"] for item in scheme] + [item["target"] for item in scheme]
+            [item["source"] for item in scheme] + [item["target"]
+                                                   for item in scheme]
         )
     )
     input_sentence = suggestions[int(random() * len(suggestions))]["text"].format(
@@ -1268,3 +1297,322 @@ async def get_scheme():
     input_sentence += f"\nNodes:\n{str_nodes}"
     input_sentence += f"\nRelations:\n{str_rels}"
     return jsonify({"text": input_sentence, "status": 200})
+
+
+def list_to_str(item):
+    if type(item) == list and len(item) == 1 and item[0]:
+        return str(item[0])
+    else:
+        return str(item)
+
+
+async def remove_duplicates_for_tuples(input: list) -> list:
+
+    unique_set = set(frozenset(t) for t in input)
+
+    unique_dict = [{"source": tuple(t)[0], "target":  tuple(t)[
+        1]} for t in unique_set]
+    return unique_dict
+
+
+async def check_elements(my_list):
+    return all(isinstance(x, int) and 70 <= x <= 100 for x in my_list)
+
+
+async def fuzzy_similar(a, b):
+    return (math.ceil(fuzz.token_sort_ratio(a.lower(), b.lower())))
+
+
+async def exact_similar(a, b):
+    return a.strip() == b.strip()
+
+
+async def match(source, target, methods, scores=[]):
+
+    values = []
+
+    for i, method in enumerate(methods):
+
+        if method == "fuzzy":
+
+            if type(target[1][i]) == list and len(target[1][i]) > 1:
+                results = [await fuzzy_similar(list_to_str(source[1][i]), trg) for trg in target[1][i]]
+                ratio = max(results)
+                max_index = results.index(ratio)
+
+                target_value = target[1][i][max_index]
+
+            else:
+                ratio = await fuzzy_similar(list_to_str(source[1][i]), list_to_str(target[1][i]))
+                target_value = list_to_str(target[1][i])
+
+            if ratio >= scores[i]:
+                values.append((list_to_str(source[1][i]), target_value, ratio))
+
+            else:
+                return
+
+        elif method == "exact":
+            if type(target[1][i]) == list and len(target[1][i]) > 1:
+                results = [await exact_similar(list_to_str(source[1][i]), trg) for trg in target[1][i]]
+                ratio = any(results)
+                if ratio:
+                    target_value = target[1][i][results.index(ratio)]
+                else:
+                    return
+            else:
+                ratio = await exact_similar(list_to_str(source[1][i]), list_to_str(target[1][i]))
+
+                if ratio:
+                    target_value = list_to_str(target[1][i])
+                else:
+                    return
+
+            values.append((list_to_str(source[1][i]), target_value, True))
+
+    return {"nodes": (source[0], target[0]), "values": [{"source": value[0], "target": value[1], "exact": True} if value[2] == True else {"source": value[0], "target": value[1], "exact": False, "fuzzyMatch": value[2]} for value in values]}
+
+
+select_props_script = """SELECT
+                        np.node_id AS node_id,
+                        -- pntp.id as prpt_id,
+                        -- pntp.name AS key,
+                        np.nodes_data AS value,
+                        pntp.ref_property_type_id AS type
+                        FROM projects_node_type_property AS pntp
+                        LEFT JOIN(SELECT id, node_id, project_type_property_id, nodes_data FROM node_properties) AS np ON np.project_type_property_id = pntp.id
+                        WHERE pntp.project_type_id = '{type_id}' 
+                        AND pntp.id = '{property_id}'
+                        AND jsonb_array_length(np.nodes_data) != 0
+                        ORDER BY np.node_id;
+                        """
+
+select_deafault_script = "SELECT id AS node_id, name AS value from nodes where project_type_id = '{type_id}' ORDER BY node_id;"
+
+select_enum = """
+                        SELECT id, name
+                        FROM enums
+                        WHERE project_type_id = '{type_id}' AND project_type_property_id = '{property_id}';
+                        """
+
+select_connections = """SELECT source_id, target_id
+	                    FROM edges
+                        WHERE {conditions};"""
+
+select_node_name = """SELECT n.id as node_id, n.name as node_name
+                      FROM nodes as n
+                      WHERE n.id in %s"""
+
+
+@app.route("/fuzzy_match", methods=["POST"])
+async def fuzzy_match():
+
+    error_message = "Invalid JSON data: "
+    try:
+        data = request.json
+        source_id = data['sourceId']
+        target_id = data['targetId']
+        match_list = data['matchList']
+
+        source_default_prop = data['source_default_propertyId']
+        target_default_prop = data['target_default_propertyId']
+        new_edge = data['newEdge']
+        edge_id = data['edgeId']
+
+        # page = data['page']
+        # size = data['size']
+
+        # if not isinstance(size, int) or size < 1:
+        #     error_message = "Invalid page size"
+        #     raise Exception
+
+        # if not isinstance(page, int) or page < 1:
+        #     error_message = "Invalid page"
+        #     raise Exception
+
+    except Exception as e:
+        abort(400, error_message + str(e))
+
+    methods = ['exact' if item['exact']
+               else 'fuzzy' for item in match_list]  # type: ignore
+    scores = [100 if item['exact'] else item['fuzzyMatch']
+              for item in match_list]  # type: ignore
+
+    if not await check_elements(scores):
+        abort(400, "Scores must be whole numbers within the range of 70 to 100.")
+
+    datas = {}
+    # tasks = []
+    results = []
+
+    source_nodes_data = defaultdict(list)
+    target_nodes_data = defaultdict(list)
+
+    try:
+        conn = ps.connect(dbname=DATABASE_NAME, user=DATABASE_USER,
+                          password=DATABASE_PASSWORD, port=DATABASE_PORT, host=DATABASE_HOST)
+
+    except Exception as e:
+        error_message = "Database connection error: " + str(e)
+        abort(500, error_message)
+
+    # loop = asyncio.get_event_loop()
+
+    error_message = "Error while matching: "
+    try:
+
+        for item in match_list:
+
+            cur = conn.cursor()
+
+            if item['sourceId'] not in datas:
+                if source_default_prop == item['sourceId']:
+                    cur.execute(select_deafault_script.format(
+                        type_id=source_id, property_id=source_default_prop))
+
+                    datas[item['sourceId']] = cur.fetchall()
+
+                else:
+                    cur.execute(select_props_script.format(
+                        type_id=source_id, property_id=item['sourceId']))
+
+                    get_property = cur.fetchall()
+
+                    if get_property:
+                        property_type = get_property[0][-1]
+                        print(property_type)
+                    else:
+                        property_type = ''
+
+                    datas[item['sourceId']] = [item[:-1]
+                                               for item in get_property]
+
+                    if property_type == 'enum':
+                        cur.execute(select_enum.format(
+                            type_id=source_id, property_id=item['sourceId']))
+                        enums = {item[0]: item[1] for item in cur.fetchall()}
+
+                        for i, ids_list in enumerate(datas[item['sourceId']]):
+                            datas[item['sourceId']][i] = (
+                                ids_list[0], [enums.get(id) for id in set(ids_list[-1])])
+
+                cur.close()
+
+            cur = conn.cursor()
+
+            if item['targetId'] not in datas:
+                if target_default_prop == item['targetId']:
+                    cur.execute(select_deafault_script.format(
+                        type_id=target_id, property_id=target_default_prop))
+
+                    datas[item['targetId']] = cur.fetchall()
+
+                else:
+                    cur.execute(select_props_script.format(
+                        type_id=target_id, property_id=item['targetId']))
+
+                    get_property = cur.fetchall()
+
+                    if get_property:
+                        property_type = get_property[0][-1]
+                        # print(property_type)
+                    else:
+                        property_type = ''
+
+                    datas[item['targetId']] = [item[:-1]
+                                               for item in get_property]
+
+                    if property_type == 'enum':
+                        cur.execute(select_enum.format(
+                            type_id=target_id, property_id=item['targetId']))
+                        enums = {item[0]: item[1] for item in cur.fetchall()}
+
+                        for i, ids_list in enumerate(datas[item['targetId']]):
+                            datas[item['targetId']][i] = (
+                                ids_list[0], [enums.get(id) for id in set(ids_list[-1])])
+
+                cur.close()
+
+        for prpt_id in [item['sourceId'] for item in match_list]:
+            for value in datas[prpt_id]:
+                if isinstance(value[1], list) and len(value[1]) > 1:
+                    error_message = "Source properties must not be multiple properties. "
+                    raise Exception
+
+                source_nodes_data[value[0]].append(value[1])
+
+        for prpt_id in [item['targetId'] for item in match_list]:
+            for value in datas[prpt_id]:
+                target_nodes_data[value[0]].append(value[1])
+
+        for source_node, source_values in source_nodes_data.items():
+
+            if not any(source_values):
+                continue
+            for target_node, target_values in target_nodes_data.items():
+
+                if not any(target_values):
+                    continue
+
+                if source_node != target_node and len(source_values) == len(target_values):
+                    result = await match(
+                        (source_node, source_values), (target_node, target_values), methods, scores)
+
+                    if result:
+                        results.append(result)
+
+    except Exception as e:
+        abort(400, error_message + str(e))
+
+    if not new_edge:
+
+        # results = [value for value in await asyncio.gather(*tasks) if value is not None]
+
+        conditions = ' OR '.join([
+            f"(source_id = '{result['nodes'][0]}' AND target_id = '{result['nodes'][1]}' AND project_edge_type_id = '{edge_id}')"
+            for result in results
+        ])
+
+        if conditions:
+
+            cur = conn.cursor()
+
+            cur.execute(select_connections.format(
+                conditions=conditions))
+
+            duplicates = cur.fetchall()
+
+            filtered_list = [
+                d for d in results if d['nodes'] not in duplicates]
+
+            results = filtered_list
+
+            cur.close()
+
+    # else:
+    #     results = [value for value in await asyncio.gather(*tasks) if value is not None]
+
+    # for result in results:
+    #     result['nodes'][0]
+
+    cur = conn.cursor()
+
+    all_nodes = tuple(result['nodes'][0] for result in results) + \
+        tuple(result['nodes'][1] for result in results)
+
+    node_names = {}
+    if all_nodes:
+        cur.execute(select_node_name, (all_nodes,))
+
+        for item in cur.fetchall():
+            node_names[item[0]] = item[1]
+
+        cur.close()
+
+    conn.close()
+    datas.clear()
+
+    data = [{"source": {'type_id': source_id, 'node_id': result['nodes'][0], 'node_name': node_names[result['nodes'][0]], "matchProperty": [{'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]},
+             "target": {'type_id': target_id, 'node_id': result['nodes'][1], 'node_name': node_names[result['nodes'][1]], "matchProperty": [{'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]}} for j, result in enumerate(results)]
+
+    return {"edge": {"id": edge_id, "count": len(results)}, "data": data}
