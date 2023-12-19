@@ -10,3 +10,8 @@ class Config:
     DATABASE_HOST = os.environ.get('DB_HOST')
     DATABASE_PORT = os.environ.get('DB_PORT', 5432)
     DATABASE_NAME = os.environ.get('DB_NAME')
+    
+    #ElasticSearch configurations
+    ELASTICSEARCH_URL = os.environ.get('ELASTICSEARCH_URL')
+    ELASTICSEARCH_INDEX = os.environ.get('ELASTICSEARCH_INDEX')
+    AMAZON_URL = os.environ.get('AMAZON_URL')
