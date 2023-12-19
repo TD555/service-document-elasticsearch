@@ -3,8 +3,12 @@ import time
 import os
 import requests
 
+import sys
+sys.path.append('service_for_elasticsearch')
+from configs.config import Config
+
 def is_elasticsearch_available():
-    url = os.environ['ELASTICSEARCH_URL']
+    url = Config.ELASTICSEARCH_URL
     max_retries = 60  # Number of retries to check Elasticsearch availability
     retry_interval = 4  # Seconds to wait between retries
 
