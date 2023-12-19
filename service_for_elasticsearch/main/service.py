@@ -45,9 +45,9 @@ app = Flask(__name__)
 # ES_HOST = "http://localhost:9201/"
 
 
-ES_INDEX = os.environ["ELASTICSEARCH_INDEX"]
-AMAZON_URL = os.environ["AMAZON_URL"]
-ES_HOST = os.environ["ELASTICSEARCH_URL"]
+ES_INDEX = Config.ELASTICSEARCH_INDEX
+AMAZON_URL = Config.AMAZON_URL
+ES_HOST = Config.ELASTICSEARCH_URL
 
 
 DATABASE_HOST = Config.DATABASE_HOST
