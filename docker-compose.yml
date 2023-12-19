@@ -45,6 +45,11 @@ services:
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
       ELASTICSEARCH_INDEX: 'araks_index'
       AMAZON_URL: 'https://araks-projects-develop.s3.amazonaws.com/'
+      DB_NAME: 'araksdb_v2'
+      DB_USER: 'postgres'
+      DB_HOST: 'localhost'
+      DB_PASSWORD: 'postgres'
+      DB_PORT: 5432
 
     restart: always
 

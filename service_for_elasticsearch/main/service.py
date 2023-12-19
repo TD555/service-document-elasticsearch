@@ -1544,6 +1544,8 @@ async def fuzzy_match():
             for value in datas[prpt_id]:
                 target_nodes_data[value[0]].append(value[1])
 
+        datas.clear()
+        
         for source_node, source_values in source_nodes_data.items():
 
             if not any(source_values):
@@ -1609,7 +1611,6 @@ async def fuzzy_match():
         cur.close()
 
     conn.close()
-    datas.clear()
 
     data = [{"source": {'type_id': source_id, 'node_id': result['nodes'][0], 'node_name': node_names[result['nodes'][0]], "matchProperty": [{'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]},
              "target": {'type_id': target_id, 'node_id': result['nodes'][1], 'node_name': node_names[result['nodes'][1]], "matchProperty": [{'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]}} for j, result in enumerate(results)]
