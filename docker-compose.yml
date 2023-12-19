@@ -27,7 +27,14 @@ services:
       - elasticsearch_data:/usr/share/elasticsearch/data
 
   flask_elastic_app:
-    build: ./service_for_elasticsearch
+    build: 
+      context: ./service_for_elasticsearch
+      args:
+        - DB_NAME=araksdb_v2
+        - DB_USER=postgres
+        - DB_HOST=localhost
+        - DB_PASSWORD=postgres
+        - DB_PORT=5432
     depends_on:
       - elasticsearch
     container_name: service
@@ -36,8 +43,9 @@ services:
     environment:
       PYTHONUNBUFFERED: 0
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
+      ELASTICSEARCH_INDEX: 'araks_index'
       AMAZON_URL: 'https://araks-projects-develop.s3.amazonaws.com/'
-      INDEX: 'araks_index'
+
     restart: always
 
 volumes:
