@@ -9,7 +9,7 @@ elasticsearch==8.6.2
 PyMuPDF==1.23.6
 openpyxl==3.1.2
 xlrd==2.0.1
-psycopg2==2.9.9
-rapidfuzz==3.5.2
-python-Levenshtein==0.23.0
-python-dotenv==1.0.0
+# psycopg2==2.9.9
+# rapidfuzz==3.5.2
+# python-Levenshtein==0.23.0
+# python-dotenv==1.0.0

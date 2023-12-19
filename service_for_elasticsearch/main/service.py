@@ -20,41 +20,20 @@ import os
 import re
 import io
 from collections import defaultdict
-import math
-
-import psycopg2 as ps
-from rapidfuzz import fuzz
 
 from version import __version__, __description__
-import sys
-sys.path.append("service_for_elasticsearch")
-
-from configs.config import Config
 
 app = Flask(__name__)
-
-
-# DATABASE_HOST = 'localhost'
-# DATABASE_NAME = 'araks_db'
-# DATABASE_USER = 'postgres'
-# DATABASE_PASSWORD = 'Tik.555'
-# DATABASE_PORT = 5432
 
 # ES_INDEX = "araks_index"
 # AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
 # ES_HOST = "http://localhost:9201/"
 
 
-ES_INDEX = Config.ELASTICSEARCH_INDEX
-AMAZON_URL = Config.AMAZON_URL
-ES_HOST = Config.ELASTICSEARCH_URL
+ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+AMAZON_URL = os.environ['AMAZON_URL']
+ES_HOST = os.environ['ELASTICSEARCH_URL']
 
-
-DATABASE_HOST = Config.DATABASE_HOST
-DATABASE_NAME = Config.DATABASE_NAME
-DATABASE_USER = Config.DATABASE_USER
-DATABASE_PASSWORD = Config.DATABASE_PASSWORD
-DATABASE_PORT = Config.DATABASE_PORT
 
 es = Elasticsearch([ES_HOST])
 
@@ -1298,321 +1277,332 @@ async def get_scheme():
     return jsonify({"text": input_sentence, "status": 200})
 
 
-def list_to_str(item):
-    if type(item) == list and len(item) == 1 and item[0]:
-        return str(item[0])
-    else:
-        return str(item)
+#------------------------------------------------------------------------
+# import math
+# import psycopg2 as ps
+# from rapidfuzz import fuzz
 
+# DATABASE_HOST = Config.DATABASE_HOST
+# DATABASE_NAME = Config.DATABASE_NAME
+# DATABASE_USER = Config.DATABASE_USER
+# DATABASE_PASSWORD = Config.DATABASE_PASSWORD
+# DATABASE_PORT = Config.DATABASE_PORT
 
-async def remove_duplicates_for_tuples(input: list) -> list:
+# def list_to_str(item):
+#     if type(item) == list and len(item) == 1 and item[0]:
+#         return str(item[0])
+#     else:
+#         return str(item)
 
-    unique_set = set(frozenset(t) for t in input)
 
-    unique_dict = [{"source": tuple(t)[0], "target":  tuple(t)[
-        1]} for t in unique_set]
-    return unique_dict
+# async def remove_duplicates_for_tuples(input: list) -> list:
 
+#     unique_set = set(frozenset(t) for t in input)
 
-async def check_elements(my_list):
-    return all(isinstance(x, int) and 70 <= x <= 100 for x in my_list)
+#     unique_dict = [{"source": tuple(t)[0], "target":  tuple(t)[
+#         1]} for t in unique_set]
+#     return unique_dict
 
 
-async def fuzzy_similar(a, b):
-    return (math.ceil(fuzz.token_sort_ratio(a.lower(), b.lower())))
+# async def check_elements(my_list):
+#     return all(isinstance(x, int) and 70 <= x <= 100 for x in my_list)
 
 
-async def exact_similar(a, b):
-    return a.strip() == b.strip()
+# async def fuzzy_similar(a, b):
+#     return (math.ceil(fuzz.token_sort_ratio(a.lower(), b.lower())))
 
 
-async def match(source, target, methods, scores=[]):
+# async def exact_similar(a, b):
+#     return a.strip() == b.strip()
 
-    values = []
 
-    for i, method in enumerate(methods):
+# async def match(source, target, methods, scores=[]):
 
-        if method == "fuzzy":
+#     values = []
 
-            if type(target[1][i]) == list and len(target[1][i]) > 1:
-                results = [await fuzzy_similar(list_to_str(source[1][i]), trg) for trg in target[1][i]]
-                ratio = max(results)
-                max_index = results.index(ratio)
+#     for i, method in enumerate(methods):
 
-                target_value = target[1][i][max_index]
+#         if method == "fuzzy":
 
-            else:
-                ratio = await fuzzy_similar(list_to_str(source[1][i]), list_to_str(target[1][i]))
-                target_value = list_to_str(target[1][i])
+#             if type(target[1][i]) == list and len(target[1][i]) > 1:
+#                 results = [await fuzzy_similar(list_to_str(source[1][i]), trg) for trg in target[1][i]]
+#                 ratio = max(results)
+#                 max_index = results.index(ratio)
 
-            if ratio >= scores[i]:
-                values.append((list_to_str(source[1][i]), target_value, ratio))
+#                 target_value = target[1][i][max_index]
 
-            else:
-                return
+#             else:
+#                 ratio = await fuzzy_similar(list_to_str(source[1][i]), list_to_str(target[1][i]))
+#                 target_value = list_to_str(target[1][i])
 
-        elif method == "exact":
-            if type(target[1][i]) == list and len(target[1][i]) > 1:
-                results = [await exact_similar(list_to_str(source[1][i]), trg) for trg in target[1][i]]
-                ratio = any(results)
-                if ratio:
-                    target_value = target[1][i][results.index(ratio)]
-                else:
-                    return
-            else:
-                ratio = await exact_similar(list_to_str(source[1][i]), list_to_str(target[1][i]))
+#             if ratio >= scores[i]:
+#                 values.append((list_to_str(source[1][i]), target_value, ratio))
 
-                if ratio:
-                    target_value = list_to_str(target[1][i])
-                else:
-                    return
+#             else:
+#                 return
 
-            values.append((list_to_str(source[1][i]), target_value, True))
+#         elif method == "exact":
+#             if type(target[1][i]) == list and len(target[1][i]) > 1:
+#                 results = [await exact_similar(list_to_str(source[1][i]), trg) for trg in target[1][i]]
+#                 ratio = any(results)
+#                 if ratio:
+#                     target_value = target[1][i][results.index(ratio)]
+#                 else:
+#                     return
+#             else:
+#                 ratio = await exact_similar(list_to_str(source[1][i]), list_to_str(target[1][i]))
 
-    return {"nodes": (source[0], target[0]), "values": [{"source": value[0], "target": value[1], "exact": True} if value[2] == True else {"source": value[0], "target": value[1], "exact": False, "fuzzyMatch": value[2]} for value in values]}
+#                 if ratio:
+#                     target_value = list_to_str(target[1][i])
+#                 else:
+#                     return
 
+#             values.append((list_to_str(source[1][i]), target_value, True))
 
-select_props_script = """SELECT
-                        np.node_id AS node_id,
-                        -- pntp.id as prpt_id,
-                        -- pntp.name AS key,
-                        np.nodes_data AS value,
-                        pntp.ref_property_type_id AS type
-                        FROM projects_node_type_property AS pntp
-                        LEFT JOIN(SELECT id, node_id, project_type_property_id, nodes_data FROM node_properties) AS np ON np.project_type_property_id = pntp.id
-                        WHERE pntp.project_type_id = '{type_id}' 
-                        AND pntp.id = '{property_id}'
-                        AND jsonb_array_length(np.nodes_data) != 0
-                        ORDER BY np.node_id;
-                        """
+#     return {"nodes": (source[0], target[0]), "values": [{"source": value[0], "target": value[1], "exact": True} if value[2] == True else {"source": value[0], "target": value[1], "exact": False, "fuzzyMatch": value[2]} for value in values]}
 
-select_deafault_script = "SELECT id AS node_id, name AS value from nodes where project_type_id = '{type_id}' ORDER BY node_id;"
 
-select_enum = """
-                        SELECT id, name
-                        FROM enums
-                        WHERE project_type_id = '{type_id}' AND project_type_property_id = '{property_id}';
-                        """
+# select_props_script = """SELECT
+#                         np.node_id AS node_id,
+#                         -- pntp.id as prpt_id,
+#                         -- pntp.name AS key,
+#                         np.nodes_data AS value,
+#                         pntp.ref_property_type_id AS type
+#                         FROM projects_node_type_property AS pntp
+#                         LEFT JOIN(SELECT id, node_id, project_type_property_id, nodes_data FROM node_properties) AS np ON np.project_type_property_id = pntp.id
+#                         WHERE pntp.project_type_id = '{type_id}' 
+#                         AND pntp.id = '{property_id}'
+#                         AND jsonb_array_length(np.nodes_data) != 0
+#                         ORDER BY np.node_id;
+#                         """
 
-select_connections = """SELECT source_id, target_id
-	                    FROM edges
-                        WHERE {conditions};"""
+# select_deafault_script = "SELECT id AS node_id, name AS value from nodes where project_type_id = '{type_id}' ORDER BY node_id;"
 
-select_node_name = """SELECT n.id as node_id, n.name as node_name
-                      FROM nodes as n
-                      WHERE n.id in %s"""
+# select_enum = """
+#                         SELECT id, name
+#                         FROM enums
+#                         WHERE project_type_id = '{type_id}' AND project_type_property_id = '{property_id}';
+#                         """
 
+# select_connections = """SELECT source_id, target_id
+# 	                    FROM edges
+#                         WHERE {conditions};"""
 
-@app.route("/fuzzy_match", methods=["POST"])
-async def fuzzy_match():
+# select_node_name = """SELECT n.id as node_id, n.name as node_name
+#                       FROM nodes as n
+#                       WHERE n.id in %s"""
 
-    error_message = "Invalid JSON data: "
-    try:
-        data = request.json
-        source_id = data['sourceId']
-        target_id = data['targetId']
-        match_list = data['matchList']
 
-        source_default_prop = data['source_default_propertyId']
-        target_default_prop = data['target_default_propertyId']
-        new_edge = data['newEdge']
-        edge_id = data['edgeId']
+# @app.route("/fuzzy_match", methods=["POST"])
+# async def fuzzy_match():
 
-        # page = data['page']
-        # size = data['size']
+#     error_message = "Invalid JSON data: "
+#     try:
+#         data = request.json
+#         source_id = data['sourceId']
+#         target_id = data['targetId']
+#         match_list = data['matchList']
 
-        # if not isinstance(size, int) or size < 1:
-        #     error_message = "Invalid page size"
-        #     raise Exception
+#         source_default_prop = data['source_default_propertyId']
+#         target_default_prop = data['target_default_propertyId']
+#         new_edge = data['newEdge']
+#         edge_id = data['edgeId']
 
-        # if not isinstance(page, int) or page < 1:
-        #     error_message = "Invalid page"
-        #     raise Exception
+#         # page = data['page']
+#         # size = data['size']
 
-    except Exception as e:
-        abort(400, error_message + str(e))
+#         # if not isinstance(size, int) or size < 1:
+#         #     error_message = "Invalid page size"
+#         #     raise Exception
 
-    methods = ['exact' if item['exact']
-               else 'fuzzy' for item in match_list]  # type: ignore
-    scores = [100 if item['exact'] else item['fuzzyMatch']
-              for item in match_list]  # type: ignore
+#         # if not isinstance(page, int) or page < 1:
+#         #     error_message = "Invalid page"
+#         #     raise Exception
 
-    if not await check_elements(scores):
-        abort(400, "Scores must be whole numbers within the range of 70 to 100.")
+#     except Exception as e:
+#         abort(400, error_message + str(e))
 
-    datas = {}
-    # tasks = []
-    results = []
+#     methods = ['exact' if item['exact']
+#                else 'fuzzy' for item in match_list]  # type: ignore
+#     scores = [100 if item['exact'] else item['fuzzyMatch']
+#               for item in match_list]  # type: ignore
 
-    source_nodes_data = defaultdict(list)
-    target_nodes_data = defaultdict(list)
+#     if not await check_elements(scores):
+#         abort(400, "Scores must be whole numbers within the range of 70 to 100.")
 
-    try:
-        conn = ps.connect(dbname=DATABASE_NAME, user=DATABASE_USER,
-                          password=DATABASE_PASSWORD, port=DATABASE_PORT, host=DATABASE_HOST)
+#     datas = {}
+#     # tasks = []
+#     results = []
 
-    except Exception as e:
-        error_message = "Database connection error: " + str(e)
-        abort(500, error_message)
+#     source_nodes_data = defaultdict(list)
+#     target_nodes_data = defaultdict(list)
 
-    # loop = asyncio.get_event_loop()
+#     try:
+#         conn = ps.connect(dbname=DATABASE_NAME, user=DATABASE_USER,
+#                           password=DATABASE_PASSWORD, port=DATABASE_PORT, host=DATABASE_HOST)
 
-    error_message = "Error while matching: "
-    try:
+#     except Exception as e:
+#         error_message = "Database connection error: " + str(e)
+#         abort(500, error_message)
 
-        for item in match_list:
+#     # loop = asyncio.get_event_loop()
 
-            cur = conn.cursor()
+#     error_message = "Error while matching: "
+#     try:
 
-            if item['sourceId'] not in datas:
-                if source_default_prop == item['sourceId']:
-                    cur.execute(select_deafault_script.format(
-                        type_id=source_id, property_id=source_default_prop))
+#         for item in match_list:
 
-                    datas[item['sourceId']] = cur.fetchall()
+#             cur = conn.cursor()
 
-                else:
-                    cur.execute(select_props_script.format(
-                        type_id=source_id, property_id=item['sourceId']))
+#             if item['sourceId'] not in datas:
+#                 if source_default_prop == item['sourceId']:
+#                     cur.execute(select_deafault_script.format(
+#                         type_id=source_id, property_id=source_default_prop))
 
-                    get_property = cur.fetchall()
+#                     datas[item['sourceId']] = cur.fetchall()
 
-                    if get_property:
-                        property_type = get_property[0][-1]
-                        print(property_type)
-                    else:
-                        property_type = ''
+#                 else:
+#                     cur.execute(select_props_script.format(
+#                         type_id=source_id, property_id=item['sourceId']))
 
-                    datas[item['sourceId']] = [item[:-1]
-                                               for item in get_property]
+#                     get_property = cur.fetchall()
 
-                    if property_type == 'enum':
-                        cur.execute(select_enum.format(
-                            type_id=source_id, property_id=item['sourceId']))
-                        enums = {item[0]: item[1] for item in cur.fetchall()}
+#                     if get_property:
+#                         property_type = get_property[0][-1]
+#                         print(property_type)
+#                     else:
+#                         property_type = ''
 
-                        for i, ids_list in enumerate(datas[item['sourceId']]):
-                            datas[item['sourceId']][i] = (
-                                ids_list[0], [enums.get(id) for id in set(ids_list[-1])])
+#                     datas[item['sourceId']] = [item[:-1]
+#                                                for item in get_property]
 
-                cur.close()
+#                     if property_type == 'enum':
+#                         cur.execute(select_enum.format(
+#                             type_id=source_id, property_id=item['sourceId']))
+#                         enums = {item[0]: item[1] for item in cur.fetchall()}
 
-            cur = conn.cursor()
+#                         for i, ids_list in enumerate(datas[item['sourceId']]):
+#                             datas[item['sourceId']][i] = (
+#                                 ids_list[0], [enums.get(id) for id in set(ids_list[-1])])
 
-            if item['targetId'] not in datas:
-                if target_default_prop == item['targetId']:
-                    cur.execute(select_deafault_script.format(
-                        type_id=target_id, property_id=target_default_prop))
+#                 cur.close()
 
-                    datas[item['targetId']] = cur.fetchall()
+#             cur = conn.cursor()
 
-                else:
-                    cur.execute(select_props_script.format(
-                        type_id=target_id, property_id=item['targetId']))
+#             if item['targetId'] not in datas:
+#                 if target_default_prop == item['targetId']:
+#                     cur.execute(select_deafault_script.format(
+#                         type_id=target_id, property_id=target_default_prop))
 
-                    get_property = cur.fetchall()
+#                     datas[item['targetId']] = cur.fetchall()
 
-                    if get_property:
-                        property_type = get_property[0][-1]
-                        # print(property_type)
-                    else:
-                        property_type = ''
+#                 else:
+#                     cur.execute(select_props_script.format(
+#                         type_id=target_id, property_id=item['targetId']))
 
-                    datas[item['targetId']] = [item[:-1]
-                                               for item in get_property]
+#                     get_property = cur.fetchall()
 
-                    if property_type == 'enum':
-                        cur.execute(select_enum.format(
-                            type_id=target_id, property_id=item['targetId']))
-                        enums = {item[0]: item[1] for item in cur.fetchall()}
+#                     if get_property:
+#                         property_type = get_property[0][-1]
+#                         # print(property_type)
+#                     else:
+#                         property_type = ''
 
-                        for i, ids_list in enumerate(datas[item['targetId']]):
-                            datas[item['targetId']][i] = (
-                                ids_list[0], [enums.get(id) for id in set(ids_list[-1])])
+#                     datas[item['targetId']] = [item[:-1]
+#                                                for item in get_property]
 
-                cur.close()
+#                     if property_type == 'enum':
+#                         cur.execute(select_enum.format(
+#                             type_id=target_id, property_id=item['targetId']))
+#                         enums = {item[0]: item[1] for item in cur.fetchall()}
 
-        for prpt_id in [item['sourceId'] for item in match_list]:
-            for value in datas[prpt_id]:
-                if isinstance(value[1], list) and len(value[1]) > 1:
-                    error_message = "Source properties must not be multiple properties. "
-                    raise Exception
+#                         for i, ids_list in enumerate(datas[item['targetId']]):
+#                             datas[item['targetId']][i] = (
+#                                 ids_list[0], [enums.get(id) for id in set(ids_list[-1])])
 
-                source_nodes_data[value[0]].append(value[1])
+#                 cur.close()
 
-        for prpt_id in [item['targetId'] for item in match_list]:
-            for value in datas[prpt_id]:
-                target_nodes_data[value[0]].append(value[1])
+#         for prpt_id in [item['sourceId'] for item in match_list]:
+#             for value in datas[prpt_id]:
+#                 if isinstance(value[1], list) and len(value[1]) > 1:
+#                     error_message = "Source properties must not be multiple properties. "
+#                     raise Exception
 
-        datas.clear()
+#                 source_nodes_data[value[0]].append(value[1])
+
+#         for prpt_id in [item['targetId'] for item in match_list]:
+#             for value in datas[prpt_id]:
+#                 target_nodes_data[value[0]].append(value[1])
+
+#         datas.clear()
         
-        for source_node, source_values in source_nodes_data.items():
+#         for source_node, source_values in source_nodes_data.items():
 
-            if not any(source_values):
-                continue
-            for target_node, target_values in target_nodes_data.items():
+#             if not any(source_values):
+#                 continue
+#             for target_node, target_values in target_nodes_data.items():
 
-                if not any(target_values):
-                    continue
+#                 if not any(target_values):
+#                     continue
 
-                if source_node != target_node and len(source_values) == len(target_values):
-                    result = await match(
-                        (source_node, source_values), (target_node, target_values), methods, scores)
+#                 if source_node != target_node and len(source_values) == len(target_values):
+#                     result = await match(
+#                         (source_node, source_values), (target_node, target_values), methods, scores)
 
-                    if result:
-                        results.append(result)
+#                     if result:
+#                         results.append(result)
 
-    except Exception as e:
-        abort(400, error_message + str(e))
+#     except Exception as e:
+#         abort(400, error_message + str(e))
 
-    if not new_edge:
+#     if not new_edge:
 
-        # results = [value for value in await asyncio.gather(*tasks) if value is not None]
+#         # results = [value for value in await asyncio.gather(*tasks) if value is not None]
 
-        conditions = ' OR '.join([
-            f"(source_id = '{result['nodes'][0]}' AND target_id = '{result['nodes'][1]}' AND project_edge_type_id = '{edge_id}')"
-            for result in results
-        ])
+#         conditions = ' OR '.join([
+#             f"(source_id = '{result['nodes'][0]}' AND target_id = '{result['nodes'][1]}' AND project_edge_type_id = '{edge_id}')"
+#             for result in results
+#         ])
 
-        if conditions:
+#         if conditions:
 
-            cur = conn.cursor()
+#             cur = conn.cursor()
 
-            cur.execute(select_connections.format(
-                conditions=conditions))
+#             cur.execute(select_connections.format(
+#                 conditions=conditions))
 
-            duplicates = cur.fetchall()
+#             duplicates = cur.fetchall()
 
-            filtered_list = [
-                d for d in results if d['nodes'] not in duplicates]
+#             filtered_list = [
+#                 d for d in results if d['nodes'] not in duplicates]
 
-            results = filtered_list
+#             results = filtered_list
 
-            cur.close()
+#             cur.close()
 
-    # else:
-    #     results = [value for value in await asyncio.gather(*tasks) if value is not None]
+#     # else:
+#     #     results = [value for value in await asyncio.gather(*tasks) if value is not None]
 
-    # for result in results:
-    #     result['nodes'][0]
+#     # for result in results:
+#     #     result['nodes'][0]
 
-    cur = conn.cursor()
+#     cur = conn.cursor()
 
-    all_nodes = tuple(result['nodes'][0] for result in results) + \
-        tuple(result['nodes'][1] for result in results)
+#     all_nodes = tuple(result['nodes'][0] for result in results) + \
+#         tuple(result['nodes'][1] for result in results)
 
-    node_names = {}
-    if all_nodes:
-        cur.execute(select_node_name, (all_nodes,))
+#     node_names = {}
+#     if all_nodes:
+#         cur.execute(select_node_name, (all_nodes,))
 
-        for item in cur.fetchall():
-            node_names[item[0]] = item[1]
+#         for item in cur.fetchall():
+#             node_names[item[0]] = item[1]
 
-        cur.close()
+#         cur.close()
 
-    conn.close()
+#     conn.close()
 
-    data = [{"source": {'type_id': source_id, 'node_id': result['nodes'][0], 'node_name': node_names[result['nodes'][0]], "matchProperty": [{'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]},
-             "target": {'type_id': target_id, 'node_id': result['nodes'][1], 'node_name': node_names[result['nodes'][1]], "matchProperty": [{'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]}} for j, result in enumerate(results)]
+#     data = [{"source": {'type_id': source_id, 'node_id': result['nodes'][0], 'node_name': node_names[result['nodes'][0]], "matchProperty": [{'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['sourceId'], 'name': prop['source'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]},
+#              "target": {'type_id': target_id, 'node_id': result['nodes'][1], 'node_name': node_names[result['nodes'][1]], "matchProperty": [{'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact'], 'fuzzyMatch': prop['fuzzyMatch']} if 'fuzzyMatch' in prop else {'id': match_list[i]['targetId'], 'name': prop['target'], 'exact': prop['exact']} for i, prop in enumerate(result["values"])]}} for j, result in enumerate(results)]
 
-    return {"edge": {"id": edge_id, "count": len(results)}, "data": data}
+#     return {"edge": {"id": edge_id, "count": len(results)}, "data": data}
