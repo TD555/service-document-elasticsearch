@@ -235,16 +235,16 @@ async def extract_text_from_xls(xls_file):
         return {"message": e.stderr}
 
 
-@app.errorhandler(Exception)
-def handle_error(error):
-    # Get the traceback
-    error_traceback = traceback.format_exc()
-    print(error_traceback)
-    if hasattr(error, "code"):
-        status_code = error.code
-    else:
-        status_code = 500
-    return {"message": str(error).strip(), "status_code": status_code, "traceback" : error_traceback}, status_code
+# @app.errorhandler(Exception)
+# def handle_error(error):
+#     # Get the traceback
+#     error_traceback = traceback.format_exc()
+#     print(error_traceback)
+#     if hasattr(error, "code"):
+#         status_code = error.code
+#     else:
+#         status_code = 500
+#     return {"message": str(error).strip(), "status_code": status_code, "traceback" : error_traceback}, status_code
 
 
 @app.after_request
