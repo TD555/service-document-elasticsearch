@@ -22,7 +22,9 @@ services:
 
       - index.merge.scheduler.max_thread_count = 1
       - search.max_open_scroll_context = 500
-
+      - cluster.routing.allocation.disk.watermark.low = 85%
+      - cluster.routing.allocation.disk.watermark.high = 90%
+      
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
 
