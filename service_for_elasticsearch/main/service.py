@@ -1,6 +1,7 @@
 from flask import Flask, jsonify, request, json, abort, make_response
 from elasticsearch import Elasticsearch, ConnectionError, BadRequestError, exceptions
 from elasticsearch.helpers import bulk
+from elasticsearch.exceptions import ConflictError
 import asyncio
 from datetime import datetime
 import requests
@@ -235,16 +236,16 @@ async def extract_text_from_xls(xls_file):
         return {"message": e.stderr}
 
 
-# @app.errorhandler(Exception)
-# def handle_error(error):
-#     # Get the traceback
-#     error_traceback = traceback.format_exc()
-#     print(error_traceback)
-#     if hasattr(error, "code"):
-#         status_code = error.code
-#     else:
-#         status_code = 500
-#     return {"message": str(error).strip(), "status_code": status_code, "traceback" : error_traceback}, status_code
+@app.errorhandler(Exception)
+def handle_error(error):
+    # Get the traceback
+    error_traceback = traceback.format_exc()
+    print(error_traceback)
+    if hasattr(error, "code"):
+        status_code = error.code
+    else:
+        status_code = 500
+    return {"message": str(error).strip(), "status_code": status_code}, status_code
 
 
 @app.after_request
@@ -286,21 +287,21 @@ async def create_or_update():
     except:
         abort(403, "Invalid raw data")
 
-    all_docs = await get_list()
-
+    all_docs = await get_list(node_id = data_dict["node_id"])
+    
+    
     id_dict = {"doc_ids": defaultdict(list)}
     for item in all_docs.json["docs"]:
-        if item["node_id"] == data_dict["node_id"]:
-            id_dict["doc_ids"][item["path"]].append(
-                item["doc_id"] + str(item["page"])
-            )
-            id_dict["source"] = {  # type: ignore
-                "node_name": item["node_name"],
-                "type_name": item["type_name"],
-                "property_name": item["property_name"],
-                "default_image": item["default_image"],
-                "color": item["color"],
-            }
+        id_dict["doc_ids"][item["path"]].append(
+            item["doc_id"] + str(item["page"])
+        )
+        id_dict["source"] = {  # type: ignore
+            "node_name": item["node_name"],
+            "type_name": item["type_name"],
+            "property_name": item["property_name"],
+            "default_image": item["default_image"],
+            "color": item["color"],
+        }
 
     print("All filenames in the start", list(id_dict["doc_ids"].keys()))
     filenames = list(id_dict["doc_ids"].keys())
@@ -308,6 +309,7 @@ async def create_or_update():
     data_dict["id_dict"] = id_dict
 
     returned_jsons = []
+    
     for item in remove_duplicates(nodes_data):
         result = {**data_dict, **item}
         returned_jsons.append(upload_document(result))
@@ -635,19 +637,17 @@ async def delete_node():
     except:
         abort(403, "Invalid raw data")
 
-    all_docs = await get_list()
+    all_docs = await get_list(project_id=project_id, node_id=node_id, property_id=property_id)
 
     file_ids = list(
         set(
             [
                 (item["doc_id"], item["path"])
                 for item in all_docs.json["docs"]
-                if ((item["property_id"] == property_id) or not property_id) and ((item["node_id"] == node_id) or not node_id)
-                and (item["project_id"] == project_id)
             ]
         )
     )
-
+    
     if not file_ids:
         return {
             "message": f"No document exists to be deleted."
@@ -1088,22 +1088,37 @@ def get_page():
 
 
 @app.route("/get_list", methods=["GET"])
-async def get_list():
-    query = {"query": {"match_all": {}}, "size": 10000}
+async def get_list(**search):
 
+    if not search:
+        query = {"query": {"match_all": {}}, "size": 10000}
+
+    else:
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                    ]
+                }
+            }, "size": 10000}
+
+        for key, value in search.items():
+            if value:
+                query['query']['bool']['must'].append({ "term": { key + '.keyword': value }})
+    
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
-    # try:
-    while True:
-        if es.indices.exists(index=ES_INDEX):
-            initial_search = es.search(
-                index=ES_INDEX, body=query, scroll="1m")
-            break
-        else:
-            time.sleep(1)
-            continue
+    try:
+        while True:
+            if es.indices.exists(index=ES_INDEX):
+                initial_search = es.search(
+                    index=ES_INDEX, body=query, scroll="1m")
+                break
+            else:
+                continue
 
-    # except Exception as e:
-    #     abort(500, str(e))
+    except Exception as e:
+        abort(500, str(e))
+
     scroll_id = initial_search["_scroll_id"]
     total_results = initial_search["hits"]["total"]["value"]
 
@@ -1146,11 +1161,15 @@ async def get_list():
 
 # @app.route("/delete/<string:document_id>", methods=["DELETE"])
 async def delete(document_id, path):
-    query = {"query": {"match": {"doc_id": document_id}}}
+    query = {"query": {"term": {"doc_id.keyword": document_id}}}
 
     # Use the delete_by_query API to delete all documents that match the query
-    response = es.delete_by_query(index=ES_INDEX, body=query)
+    try:
+        response = es.delete_by_query(index=ES_INDEX, body=query, scroll_size=10000)
 
+    except ConflictError as e:
+        abort(409 , str(e))
+        
     if response["deleted"]:
         return {"message": "Document was deleted from database.", "URL": path}
     else:
@@ -1161,7 +1180,7 @@ async def delete(document_id, path):
 async def clean():
     query = {"query": {"match_all": {}}}
 
-    if es.delete_by_query(index=ES_INDEX, body=query)["deleted"]:
+    if es.delete_by_query(index=ES_INDEX, body=query, scroll_size=10000)["deleted"]:
         return jsonify(
             {
                 "message": f"Elasticsearch database has cleaned successfully.",
