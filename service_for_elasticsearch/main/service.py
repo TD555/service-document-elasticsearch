@@ -244,7 +244,7 @@ def handle_error(error):
         status_code = error.code
     else:
         status_code = 500
-    return {"message": str(error).strip(), "status_code": status_code}, status_code
+    return {"message": str(error).strip(), "status_code": status_code, "traceback" : error_traceback}, status_code
 
 
 @app.after_request

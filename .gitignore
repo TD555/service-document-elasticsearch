@@ -7,6 +7,7 @@ test.ipynb
 share/
 svo.ipynb
 REBEL.ipynb
+extract_keywords.ipynb
 .vscode/
 service_for_elasticsearch/testing
 service_for_elasticsearch/main/preprocess.py
