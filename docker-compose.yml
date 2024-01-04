@@ -9,19 +9,20 @@ services:
     environment:
       - xpack.security.enabled=false
       - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms1G -Xmx1G
-      - index.refresh_interval = 1s
-      - index.number_of_replicas = 0
-      - index.translog.flush_threshold_ops = 50000
-      - index.translog.flush_threshold_size = 1.5gb
-      - indices.store.throttle.max_bytes_per_sec = 20mb
-
-      - threadpool.bulk.type = fixed
-      - threadpool.bulk.size = 12
-      - threadpool.bulk.queue_size = 200000
-
-      - index.merge.scheduler.max_thread_count = 1
-      - search.max_open_scroll_context = 500
+      - ES_JAVA_OPTS=-Xms2G -Xmx2G
+      - cluster.routing.allocation.disk.watermark.low=85%
+      - cluster.routing.allocation.disk.watermark.high=95%
+      - cluster.info.update.interval=1m
+      - index.refresh_interval=1s
+      - index.number_of_replicas=0
+      - index.translog.flush_threshold_ops=50000
+      - index.translog.flush_threshold_size=1.5gb
+      - indices.store.throttle.max_bytes_per_sec=20mb
+      - threadpool.bulk.type=fixed
+      - threadpool.bulk.size=8
+      - threadpool.bulk.queue_size=1000
+      - index.merge.scheduler.max_thread_count=2
+      - search.max_open_scroll_context=500
 
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
