@@ -1092,18 +1092,18 @@ async def get_list():
     query = {"query": {"match_all": {}}, "size": 10000}
 
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
-    try:
-        while True:
-            if es.indices.exists(index=ES_INDEX):
-                initial_search = es.search(
-                    index=ES_INDEX, body=query, scroll="1m")
-                break
-            else:
-                time.sleep(1)
-                continue
+    # try:
+    while True:
+        if es.indices.exists(index=ES_INDEX):
+            initial_search = es.search(
+                index=ES_INDEX, body=query, scroll="1m")
+            break
+        else:
+            time.sleep(1)
+            continue
 
-    except Exception as e:
-        abort(500, str(e))
+    # except Exception as e:
+    #     abort(500, str(e))
     scroll_id = initial_search["_scroll_id"]
     total_results = initial_search["hits"]["total"]["value"]
 
