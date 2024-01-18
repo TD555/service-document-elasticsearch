@@ -285,9 +285,9 @@ async def create_or_update():
         #     data_dict['default_image'] = AMAZON_URL + data_dict['default_image']
 
     except:
-        abort(403, "Invalid raw data")
+        abort(422, "Invalid raw data")
 
-    all_docs = await get_list(node_id = data_dict["node_id"])
+    all_docs = await get_list(node_id = data_dict["node_id"], property_id = data_dict["property_id"])
     
     
     id_dict = {"doc_ids": defaultdict(list)}
@@ -635,7 +635,7 @@ async def delete_node():
         property_id = request.json.get("property_id", None)
 
     except:
-        abort(403, "Invalid raw data")
+        abort(422, "Invalid raw data")
 
     all_docs = await get_list(project_id=project_id, node_id=node_id, property_id=property_id)
 
@@ -828,7 +828,7 @@ def get_page():
         sortField = request.json["sortField"]
 
     except:
-        abort(403, "Invalid raw data")
+        abort(422, "Invalid raw data")
 
     if len(keyword.strip()) < 3:
         abort(422, "Search terms must contain at least 3 characters")
@@ -1167,7 +1167,7 @@ async def delete(document_id, path):
     try:
         response = es.delete_by_query(index=ES_INDEX, body=query, scroll_size=10000)
 
-    except ConflictError as e:
+    except Exception as e:
         abort(409 , str(e))
         
     if response["deleted"]:
