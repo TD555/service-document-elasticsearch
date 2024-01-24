@@ -15,6 +15,7 @@ import pytz
 import openpyxl
 import xlrd
 import subprocess
+import threading
 
 import fitz
 import os
@@ -22,6 +23,8 @@ import re
 import io
 
 from version import __version__, __description__
+
+from keyword_extraction import keyword_extractor
 
 app = Flask(__name__)
 
@@ -287,9 +290,8 @@ async def create_or_update():
     except:
         abort(422, "Invalid raw data")
 
-    all_docs = await get_list(node_id = data_dict["node_id"], property_id = data_dict["property_id"])
-    
-    
+    all_docs = await get_list(node_id=data_dict["node_id"])
+
     id_dict = {"doc_ids": defaultdict(list)}
     for item in all_docs.json["docs"]:
         id_dict["doc_ids"][item["path"]].append(
@@ -309,13 +311,18 @@ async def create_or_update():
     data_dict["id_dict"] = id_dict
 
     returned_jsons = []
-    
+
     for item in remove_duplicates(nodes_data):
         result = {**data_dict, **item}
         returned_jsons.append(upload_document(result))
 
-    # print(returned_jsons)
     returned_jsons = await asyncio.gather(*returned_jsons)
+
+    items = [(item['URL'], item['texts']) for item in returned_jsons if 'texts' in item.keys()]
+    
+    thread = threading.Thread(target=update_keywords, kwargs={
+                    'items': items})
+    thread.start()
 
     print("All filenames in the end", filenames)
 
@@ -327,14 +334,29 @@ async def create_or_update():
         delete_response = await delete(old_id, filename)
         returned_jsons.append(delete_response)
 
-    # print((await get_list()).json['docs'])
-    return jsonify({"messages": returned_jsons, "status": 200})
+    return jsonify({"messages": [{'URL' : item['URL'], 'message' : item['message']} for item in returned_jsons], "status": 200})
+
+
+def update_keywords(items):
+    
+    for url, text in items:
+        es.update_by_query(
+            index=ES_INDEX,
+            body={
+                "query": {
+                    "term": {
+                        "path.keyword" : url
+                    }
+                },
+                "script": {
+                    "source": f"ctx._source.keywords = {keyword_extractor.extract(url, text)}",
+                    "lang": "painless"
+                }
+            }
+        )
 
 
 async def upload_document(data):
-    # parsed = parser.from_buffer(file.read())
-    # text = parsed["content"]
-    # content = text.strip()
 
     try:
         name = data["name"]
@@ -461,6 +483,7 @@ async def upload_document(data):
                 filename=name,
                 page=0,
                 page_content="",
+                keywords=[],
                 created=str(gmt_plus_4_time_str),
             )
             raise Exception
@@ -518,6 +541,7 @@ async def upload_document(data):
                 filename=name,
                 page=0,
                 page_content="",
+                keywords=[],
                 created=str(gmt_plus_4_time_str),
             )
 
@@ -541,6 +565,7 @@ async def upload_document(data):
             filename=name,
             page=0,
             page_content="",
+            keywords=[],
             created=str(gmt_plus_4_time_str),
         )
 
@@ -564,6 +589,7 @@ async def upload_document(data):
             filename=name,
             page=0,
             page_content="",
+            keywords=[],
             created=str(gmt_plus_4_time_str),
         )
 
@@ -600,9 +626,12 @@ async def upload_document(data):
                 filename=name,
                 page=page_num + 1,
                 page_content=page_content,
+                keywords=[],
                 created=str(gmt_plus_4_time_str),
             )
 
+        return {"message": f"Document was created in database", "URL": path, "texts" : ' '.join(texts)}
+    
     else:
         create_doc(
             es,
@@ -621,6 +650,7 @@ async def upload_document(data):
             filename=name,
             page=0,
             page_content="",
+            keywords=[],
             created=str(gmt_plus_4_time_str),
         )
 
@@ -647,7 +677,7 @@ async def delete_node():
             ]
         )
     )
-    
+
     if not file_ids:
         return {
             "message": f"No document exists to be deleted."
@@ -1104,8 +1134,9 @@ async def get_list(**search):
 
         for key, value in search.items():
             if value:
-                query['query']['bool']['must'].append({ "term": { key + '.keyword': value }})
-    
+                query['query']['bool']['must'].append(
+                    {"term": {key + '.keyword': value}})
+
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
     try:
         while True:
@@ -1142,6 +1173,7 @@ async def get_list(**search):
                 "default_image": hit["_source"]["default_image"],
                 "color": hit["_source"]["color"],
                 "path": hit["_source"]["path"],
+                "keywords": hit["_source"]["keywords"],
             }
             documents.append(document)
 
@@ -1165,11 +1197,12 @@ async def delete(document_id, path):
 
     # Use the delete_by_query API to delete all documents that match the query
     try:
-        response = es.delete_by_query(index=ES_INDEX, body=query, scroll_size=10000)
+        response = es.delete_by_query(
+            index=ES_INDEX, body=query, scroll_size=10000)
 
-    except Exception as e:
-        abort(409 , str(e))
-        
+    except ConflictError as e:
+        abort(409, str(e))
+
     if response["deleted"]:
         return {"message": "Document was deleted from database.", "URL": path}
     else:
@@ -1200,7 +1233,7 @@ def sort_dict(my_dict: dict):
     }
 
 
-def get_count(nodes: list, source_target: list = None) -> dict:
+def get_count(nodes: list, source_target: list = None) -> dict:  # type: ignore
     if not source_target:
         source_target = nodes
     return {node: source_target.count(node) for node in set(nodes)}

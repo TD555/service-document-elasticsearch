@@ -18,6 +18,6 @@ COPY --chown=service-elasticsearch:service-elasticsearch ./requirements.txt  /va
 
 ENV PATH="$PATH:/home/service-elasticsearch/.local/bin"
 
-RUN python3 -m pip install --no-cache-dir  -r requirements.txt
+RUN python3 -m pip install --no-cache-dir  -r requirements.txt && python3 -m spacy download en_core_web_sm && python3 -m spacy download ru_core_news_sm
 
 CMD ["python3", "run.py"]
