@@ -21,7 +21,7 @@ spacy_nlp_ru = spacy.load('ru_core_news_sm')
 spacy_nlp.tokenizer = Tokenizer(spacy_nlp.vocab, token_match=re.compile(r'\S+').match)
 spacy_nlp_ru.tokenizer = Tokenizer(spacy_nlp_ru.vocab, token_match=re.compile(r'\S+').match)
 sw_s_en = stopwords.words('english')
-sw_s_en.extend(['', 'et', 'al'])
+sw_s_en.extend(['', 'et', 'al', 'none'])
 check_en_pattern = r'[a-zA-Z]+'
 sw_s_ru = stopwords.words('russian')
 sw_s_ru.extend(['', 'др'])
@@ -30,10 +30,25 @@ et_al_pattern = r'.*et al.*'
 et_al_pattern_ru = r'.*и др.*'
 sub_pattern = r'^[^\w]*(.*?)[^\w]*$'
 
+def decontracted(phrase):
+    # specific
+    phrase = re.sub(r"won[\'\’]t", "will not", phrase)
+    phrase = re.sub(r"can[\'\’]t", "can not", phrase)
+
+    # general
+    phrase = re.sub(r"n[\'\’]t", " not", phrase)
+    phrase = re.sub(r"[\'\’]re", " are", phrase)
+    phrase = re.sub(r"[\'\’]s", " is", phrase)
+    phrase = re.sub(r"[\'\’]d", " would", phrase)
+    phrase = re.sub(r"[\'\’]ll", " will", phrase)
+    phrase = re.sub(r"[\'\’]t", " not", phrase)
+    phrase = re.sub(r"[\'\’]ve", " have", phrase)
+    phrase = re.sub(r"[\'\’]m", " am", phrase)
+    return phrase
 
 def is_noun(token, lang='en'):
     if lang == 'en':
-        return token.tag_.startswith('NN')
+        return token.tag_.startswith('NN') and token.pos_ not in ['PRON', 'ADJ']
     elif lang == 'ru':
         return 'NOUN' in token.tag_
 
@@ -43,13 +58,15 @@ def extract(URL, doc_text):
     list_of_counters = {'tokens' : defaultdict(int), 'compounds' : []}
     list_of_counters['tokens'] = defaultdict(int)
 
+    decontracted_text = decontracted(doc_text)
+    
     if str(detect_langs(doc_text)[0]).startswith('ru') or str(detect_langs(doc_text)[0]).startswith('bg'):
-        spacy_nlp_ru.max_length = len(doc_text)
-        doc = spacy_nlp_ru(doc_text)
+        spacy_nlp_ru.max_length = len(decontracted_text)
+        doc = spacy_nlp_ru(decontracted_text)
         lang = 'ru'
     else:
-        spacy_nlp.max_length = len(doc_text)
-        doc = spacy_nlp(doc_text)
+        spacy_nlp.max_length = len(decontracted_text)
+        doc = spacy_nlp(decontracted_text)
         lang = 'en'
         
     i = 0
@@ -69,8 +86,6 @@ def extract(URL, doc_text):
 
                 if ' ' in comp_text.strip() and comp_text.strip() and not re.compile(et_al_pattern_ru).match(comp_text.strip()) and not all(token.strip().lower() in sw_s_ru for token in comp_text.split()):
                     compound_nouns[comp_text.strip().title()] += 1
-                    if comp_text.strip().title() == "Новото Предложение":
-                        print(doc[i].text)
                     i += 1
                     continue
 
@@ -123,13 +138,18 @@ def extract(URL, doc_text):
 
     sorted_compounds = sorted(
         list_of_counters['compounds'], key=lambda x: x[1], reverse=True)
-
-    scaled_keys = scaler.fit_transform(
-        np.array([item[1] for item in sorted_keys]).reshape(-1, 1))
-
-    scaled_compounds = scaler.fit_transform(
-        np.array([item[1] for item in sorted_compounds]).reshape(-1, 1))
-
+    
+    
+    if sorted_keys:
+        scaled_keys = scaler.fit_transform(
+            np.array([item[1] for item in sorted_keys]).reshape(-1, 1))
+    else: scaled_keys = np.array([])
+    
+    if sorted_compounds:
+        scaled_compounds = scaler.fit_transform(
+            np.array([item[1] for item in sorted_compounds]).reshape(-1, 1))
+    else: scaled_compounds = np.array([])
+    
     for i in range(len(sorted_keys)):
         if scaled_keys[i] < 0.5:
             break
@@ -140,7 +160,7 @@ def extract(URL, doc_text):
             break
     else:
         j = 0
-
-    all_keys = [item[0] for item in (sorted_keys[:i] + sorted_compounds[:j])]
     
+    all_keys = [{'name' : item[0], 'score' : scaled_keys[:i][idx_i][0]} for idx_i, item in enumerate(sorted_keys[:i])] + [{'name' : item[0], 'score' : scaled_compounds[:j][idx_j][0]} for idx_j, item in enumerate(sorted_compounds[:j])]
+
     return all_keys
