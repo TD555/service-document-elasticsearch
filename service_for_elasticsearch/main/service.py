@@ -30,11 +30,13 @@ from keyword_extraction import keyword_extractor
 
 app = Flask(__name__)
 
+# OLD_ES_INDEX = "araks_index_pre"
 # ES_INDEX = "araks_index"
 # AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
 # ES_HOST = "http://localhost:9201/"
 
 
+OLD_ES_INDEX = os.environ['ELASTICSEARCH_OLD_INDEX']
 ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
 AMAZON_URL = os.environ['AMAZON_URL']
 ES_HOST = os.environ['ELASTICSEARCH_URL']
@@ -396,7 +398,9 @@ async def delete_empty_docs():
 
     es.delete_by_query(index=ES_INDEX, body=delete_query)
 
-
+async def index_item(index, id, body):
+    es.index(index=index, id=id, body=body)
+    
 @app.route("/create_or_update", methods=["POST"])
 async def create_or_update():
 
@@ -459,7 +463,7 @@ async def create_or_update():
         })
 
         thread = threading.Thread(target=update_keywords, kwargs={
-            'items': [(item['url'], item['content']) if item['url'].startswith(AMAZON_URL) else (AMAZON_URL + item['url'], item['content']) for item in [item for item in non_repeat_nodes_data if item['content']]]})
+            'items': [(item['url'], item['content']) if item['url'].startswith(AMAZON_URL) else (AMAZON_URL + item['url'], item['content']) for item in [item_ for item_ in non_repeat_nodes_data if item_['content']]]})
 
         thread.start()
 
@@ -475,14 +479,12 @@ async def create_or_update():
 
         # Document does not exist, create a new one
 
-        es.index(
-            index=ES_INDEX,
+        await index_item(index=ES_INDEX,
             id=node_id,
-            body=document_data
-        )
+            body=document_data)
 
         thread = threading.Thread(target=update_keywords, kwargs={
-            'items': [(item['url'], item['content']) if AMAZON_URL + item['url'] else (item['url'], item['content']) for item in [item for item in nodes_data if item['content']]]})
+            'items': [(item['url'], item['content']) if item['url'].startswith(AMAZON_URL) else (AMAZON_URL + item['url'], item['content']) for item in [item_ for item_ in nodes_data if item_['content']]]})
 
         thread.start()
 
@@ -1451,3 +1453,197 @@ async def get_scheme():
     input_sentence += f"\nNodes:\n{str_nodes}"
     input_sentence += f"\nRelations:\n{str_rels}"
     return jsonify({"text": input_sentence, "status": 200})
+
+
+async def get__old_list(**search):
+
+    if not search:
+        query = {"query": {"match_all": {}}, "size": 10000}
+
+    else:
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                    ]
+                }
+            }, "size": 10000}
+
+        for key, value in search.items():
+            if value:
+                query['query']['bool']['must'].append(
+                    {"term": {key + '.keyword': value}})
+
+    # Use the initial search API to retrieve the first batch of documents and the scroll ID
+    try:
+        while True:
+            if es.indices.exists(index=OLD_ES_INDEX):
+                initial_search = es.search(
+                    index=OLD_ES_INDEX, body=query, scroll="1m")
+                break
+            else:
+                continue
+
+    except Exception as e:
+        abort(500, str(e))
+
+    scroll_id = initial_search["_scroll_id"]
+    total_results = initial_search["hits"]["total"]["value"]
+
+    # Iterate through the batches of results using the Scroll API
+    documents = []
+    while total_results > 0:
+        for hit in initial_search["hits"]["hits"]:
+            document = {
+                "filename": hit["_source"]["filename"],
+                "doc_id": hit["_source"]["doc_id"],
+                "user_id": hit["_source"]["user_id"],
+                "type_id": hit["_source"]["type_id"],
+                "type_name": hit["_source"]["type_name"],
+                "property_id": hit["_source"]["property_id"],
+                "property_name": hit["_source"]["property_name"],
+                "page": hit["_source"]["page"],
+                "page_content": hit["_source"]["page_content"],
+                "created": hit["_source"]["created"],
+                "project_id": hit["_source"]["project_id"],
+                "node_id": hit["_source"]["node_id"],
+                "node_name": hit["_source"]["node_name"],
+                "default_image": hit["_source"]["default_image"],
+                "color": hit["_source"]["color"],
+                "path": hit["_source"]["path"],
+            }
+            documents.append(document)
+
+        # Perform the next scroll request
+        initial_search = es.scroll(scroll_id=scroll_id, scroll="1s")
+        scroll_id = initial_search["_scroll_id"]
+        total_results -= len(initial_search["hits"]["hits"])
+        if len(initial_search["hits"]["hits"]) == 0:
+            break
+
+    # Clear the scroll context when done
+    es.clear_scroll(scroll_id=scroll_id)
+    # Print the list of documents
+
+    return jsonify({"docs": documents, "status": 200})
+
+
+@app.route("/migrate", methods=["GET"])
+async def migration():
+    try:
+        new_index_list = []
+        data = (await (get__old_list())).json['docs']
+        # with open("testing/data.json", 'r') as file:
+        #     data = json.load(file)['docs']
+        sorted_data = sorted(data, key=lambda x: (x["node_id"], x["path"], x["page"]))
+        
+        for item in sorted_data:
+            # print(item["property_id"])
+            node_found = False
+            property_found = False
+            data_found = False
+
+            for i, new_item in enumerate(new_index_list):
+                if item["node_id"] == new_item['node_id']:
+                    node_found = True
+
+                    for j, prop_item in enumerate(new_index_list[i]['property']):
+                        if item["property_id"] == prop_item['id']:
+                            # print(item["property_id"], prop_item['id'])
+                            property_found = True
+
+                            for k, doc_item in enumerate(new_index_list[i]['property'][j]['data']):
+                                if item['path'] == doc_item['url']:
+                                    data_found = True
+                                    
+                                    new_index_list[i]['property'][j]['data'][k]['content'] += ' ' + \
+                                        item['page_content']
+                                    break
+                            
+                            if not data_found:
+                                new_data = {
+                                    "content": item["page_content"],
+                                    "created": item["created"],
+                                    "name": item["filename"],
+                                    "url": item["path"]
+                                }
+                                
+                                new_index_list[i]['property'][j]['data'].append(new_data)
+
+
+                    if not property_found:
+                        new_property = {
+                            "data": [
+                                {
+                                    "content": item["page_content"],
+                                    "created": item["created"],
+                                    "name": item["filename"],
+                                    "url": item["path"]
+                                }
+                            ],
+                            "data_type": "document",
+                            "id": item["property_id"],
+                            "name": item["property_name"]
+                        }
+                        
+                        new_index_list[i]['property'].append(new_property)
+
+            if not node_found:
+                new_index = {}  # Create a new dictionary for each iteration
+                new_index["color"] = item["color"]
+                new_index["default_image"] = item["default_image"]
+                new_index["node_id"] = item["node_id"]
+                new_index["node_name"] = item["node_name"]
+                new_index["project_id"] = item["project_id"]
+                new_index["type_id"] = item["type_id"]
+                new_index["type_name"] = item["type_name"]
+                new_index["user_id"] = "item['user_id']"
+
+                new_index["property"] = [
+                    {
+                        "data": [
+                            {
+                                "content": item["page_content"],
+                                "created": item["created"],
+                                "name": item["filename"],
+                                "url": item["path"]
+                            }
+                        ],
+                        "data_type": "document",
+                        "id": item["property_id"],
+                        "name": item["property_name"]
+                    }
+                ]
+                
+                new_index_list.append(new_index)
+
+        tasks = []
+        
+        for item in new_index_list:
+            node_id = item["node_id"]
+            index_name = ES_INDEX
+            body = item
+
+            # Create a task for each index call
+            task = index_item(index_name, node_id, body)
+            tasks.append(task)
+
+
+        await asyncio.gather(*tasks)
+        
+        items = []
+        
+        for i in range(len(new_index_list)):
+            for j in range(len(new_index_list[i]['property'])):
+                for k in range(len(new_index_list[i]['property'][j]['data'])):
+                    items.append((new_index_list[i]['property'][j]['data'][k]['url'], new_index_list[i]['property'][j]['data'][k]['content']))
+            
+        thread = threading.Thread(target=update_keywords, kwargs={
+            'items': [item if item[0].startswith(AMAZON_URL) else (AMAZON_URL + item[0], item[1]) for item in [item_ for item_ in items if item_[1]]]})
+
+        thread.start()
+        
+        return jsonify({"status": 200})
+    
+    except Exception as e:
+        abort(500, str(e))
