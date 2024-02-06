@@ -91,7 +91,6 @@ try:
     es.indices.create(index=ES_INDEX, body=put_data)
 
 except BadRequestError as e:
-    # print(str(e))
     pass
 
 
@@ -101,7 +100,6 @@ try:
     es.indices.put_settings(index=ES_INDEX, settings=settings)
     OFFSET = 10000000
 except BadRequestError as e:
-    # print(str(e))
     OFFSET = 1000000
     pass
 
@@ -210,10 +208,8 @@ async def extract_text_from_xlsx(xlsx_file):
         row_str = []
         # Loop through each row in the sheet
         for row in sheet.iter_rows(values_only=True):
-            # print(row)
             row_str.append(" ".join(map(str, row)))
 
-            # Print the formatted row
         all_texts.append(sheet_name + " " + " ".join(row_str).strip())
 
     workbook.close()
@@ -398,8 +394,10 @@ async def delete_empty_docs():
 
     es.delete_by_query(index=ES_INDEX, body=delete_query)
 
+
 async def index_item(index, id, body):
     es.index(index=index, id=id, body=body)
+
     
 @app.route("/create_or_update", methods=["POST"])
 async def create_or_update():
@@ -538,12 +536,10 @@ async def get_content(item):
         path = AMAZON_URL + path
     try:
         start = time.time()
-        print(start)
         file = await asyncio.wait_for(
             get_filestorage_object(path), timeout=request_timeout
         )
         end = time.time()
-        print(end)
         request_time = end - start
 
         if not file:
@@ -1228,7 +1224,6 @@ def search():
                     data_dict["created"] = data_hit['_source']['created']
                     data_dict["filename"] = data_hit['_source']['name']
 
-                    # print(data_dict)
                     property_dict['data'].append(data_dict)
 
                 rows.append(property_dict.copy())
@@ -1255,7 +1250,7 @@ def search():
 
     return jsonify(
         {
-            "rows": rows[limit * (page - 1): limit * page],
+            "rows": rows[limit * (page - 1): limit * page], # type: ignore
             "count": len(rows),
             "status": 200,
         }
@@ -1313,27 +1308,8 @@ async def get_list(**search):
 
     # Clear the scroll context when done
     es.clear_scroll(scroll_id=scroll_id)
-    # Print the list of documents
 
     return jsonify({"docs": documents, "status": 200})
-
-
-# @app.route("/delete/<string:document_id>", methods=["DELETE"])
-async def delete(document_id):
-    query = {"query": {"term": {"doc_id.keyword": document_id}}}
-
-    # Use the delete_by_query API to delete all documents that match the query
-    try:
-        response = es.delete_by_query(
-            index=ES_INDEX, body=query, scroll_size=10000)
-
-    except ConflictError as e:
-        abort(409, str(e))
-
-    if response["deleted"]:
-        return {"message": "Document was deleted from database.", "URL": path}
-    else:
-        return {"message": "Document doesn't exist in database.", "URL": path}
 
 
 @app.route("/clean", methods=["DELETE"])
@@ -1455,6 +1431,7 @@ async def get_scheme():
     return jsonify({"text": input_sentence, "status": 200})
 
 
+@app.route("/get__old_list", methods=["GET"])
 async def get__old_list(**search):
 
     if not search:
@@ -1523,7 +1500,6 @@ async def get__old_list(**search):
 
     # Clear the scroll context when done
     es.clear_scroll(scroll_id=scroll_id)
-    # Print the list of documents
 
     return jsonify({"docs": documents, "status": 200})
 
@@ -1532,13 +1508,12 @@ async def get__old_list(**search):
 async def migration():
     try:
         new_index_list = []
-        data = (await (get__old_list())).json['docs']
+        data = (await get__old_list()).json['docs']
         # with open("testing/data.json", 'r') as file:
         #     data = json.load(file)['docs']
         sorted_data = sorted(data, key=lambda x: (x["node_id"], x["path"], x["page"]))
         
         for item in sorted_data:
-            # print(item["property_id"])
             node_found = False
             property_found = False
             data_found = False
@@ -1549,7 +1524,6 @@ async def migration():
 
                     for j, prop_item in enumerate(new_index_list[i]['property']):
                         if item["property_id"] == prop_item['id']:
-                            # print(item["property_id"], prop_item['id'])
                             property_found = True
 
                             for k, doc_item in enumerate(new_index_list[i]['property'][j]['data']):
