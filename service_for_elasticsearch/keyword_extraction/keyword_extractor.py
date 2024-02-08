@@ -21,7 +21,7 @@ spacy_nlp_ru = spacy.load('ru_core_news_sm')
 spacy_nlp.tokenizer = Tokenizer(spacy_nlp.vocab, token_match=re.compile(r'\S+').match)
 spacy_nlp_ru.tokenizer = Tokenizer(spacy_nlp_ru.vocab, token_match=re.compile(r'\S+').match)
 sw_s_en = stopwords.words('english')
-sw_s_en.extend(['', 'et', 'al', 'none'])
+sw_s_en.extend(['', 'et', 'al', 'none', 'true', 'false'])
 check_en_pattern = r'[a-zA-Z]+'
 sw_s_ru = stopwords.words('russian')
 sw_s_ru.extend(['', 'др'])
@@ -163,4 +163,4 @@ def extract(URL, doc_text):
     
     all_keys = [{'name' : item[0], 'score' : scaled_keys[:i][idx_i][0]} for idx_i, item in enumerate(sorted_keys[:i])] + [{'name' : item[0], 'score' : scaled_compounds[:j][idx_j][0]} for idx_j, item in enumerate(sorted_compounds[:j])]
 
-    return all_keys
+    return all_keys[:20]
