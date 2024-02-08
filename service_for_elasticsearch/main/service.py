@@ -1,16 +1,11 @@
-from email import message
-from platform import node
-from flask import Flask, jsonify, request, json, abort, make_response
-from elasticsearch import Elasticsearch, ConnectionError, BadRequestError, exceptions
-from elasticsearch.helpers import bulk
-from elasticsearch.exceptions import ConflictError
+from flask import Flask, jsonify, request, abort
+from elasticsearch import Elasticsearch, ConnectionError, BadRequestError
 import asyncio
 from datetime import datetime
 import requests
 from collections import defaultdict
 from random import random
 import tempfile
-import uuid
 import traceback
 import time
 import pytz
@@ -74,7 +69,7 @@ put_data = {
                                 "keywords": {
                                     'type': 'nested',
                                     'properties': {
-                                        'name': {'type': 'text'},
+                                        'name': {"type": "text", "analyzer": "my_analyzer"},
                                         'score': {'type': 'half_float'}
                                     }
                                 }
@@ -1571,7 +1566,7 @@ async def migration():
                 new_index["project_id"] = item["project_id"]
                 new_index["type_id"] = item["type_id"]
                 new_index["type_name"] = item["type_name"]
-                new_index["user_id"] = "item['user_id']"
+                new_index["user_id"] = item['user_id']
 
                 new_index["property"] = [
                     {
