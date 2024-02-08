@@ -69,7 +69,7 @@ put_data = {
                                 "keywords": {
                                     'type': 'nested',
                                     'properties': {
-                                        'name': {"type": "text", "analyzer": "my_analyzer"},
+                                        'name': {"type": "keyword"},
                                         'score': {'type': 'half_float'}
                                     }
                                 }
@@ -393,7 +393,7 @@ async def delete_empty_docs():
 async def index_item(index, id, body):
     es.index(index=index, id=id, body=body)
 
-    
+
 @app.route("/create_or_update", methods=["POST"])
 async def create_or_update():
 
@@ -473,8 +473,8 @@ async def create_or_update():
         # Document does not exist, create a new one
 
         await index_item(index=ES_INDEX,
-            id=node_id,
-            body=document_data)
+                         id=node_id,
+                         body=document_data)
 
         thread = threading.Thread(target=update_keywords, kwargs={
             'items': [(item['url'], item['content']) if item['url'].startswith(AMAZON_URL) else (AMAZON_URL + item['url'], item['content']) for item in [item_ for item_ in nodes_data if item_['content']]]})
@@ -768,6 +768,9 @@ async def delete_node():
 
 def initialize_queries(keyword):
     query1 = {
+        "_source": {
+            "includes": ["user_id", "project_id", "color", "type_id", "type_name", "node_id", "node_name", "default_image"]
+        },
         "query": {
             "nested": {
                 "path": "property",
@@ -869,6 +872,9 @@ def initialize_queries(keyword):
     }
 
     query2 = {
+        "_source": {
+            "includes": ["user_id", "project_id", "color", "type_id", "type_name", "node_id", "node_name", "default_image"]
+        },
         "query": {
             "nested": {
                 "path": "property",
@@ -1245,7 +1251,7 @@ def search():
 
     return jsonify(
         {
-            "rows": rows[limit * (page - 1): limit * page], # type: ignore
+            "rows": rows[limit * (page - 1): limit * page],  # type: ignore
             "count": len(rows),
             "status": 200,
         }
@@ -1506,8 +1512,9 @@ async def migration():
         data = (await get__old_list()).json['docs']
         # with open("testing/data.json", 'r') as file:
         #     data = json.load(file)['docs']
-        sorted_data = sorted(data, key=lambda x: (x["node_id"], x["path"], x["page"]))
-        
+        sorted_data = sorted(data, key=lambda x: (
+            x["node_id"], x["path"], x["page"]))
+
         for item in sorted_data:
             node_found = False
             property_found = False
@@ -1524,11 +1531,11 @@ async def migration():
                             for k, doc_item in enumerate(new_index_list[i]['property'][j]['data']):
                                 if item['path'] == doc_item['url']:
                                     data_found = True
-                                    
+
                                     new_index_list[i]['property'][j]['data'][k]['content'] += ' ' + \
                                         item['page_content']
                                     break
-                            
+
                             if not data_found:
                                 new_data = {
                                     "content": item["page_content"],
@@ -1536,9 +1543,9 @@ async def migration():
                                     "name": item["filename"],
                                     "url": item["path"]
                                 }
-                                
-                                new_index_list[i]['property'][j]['data'].append(new_data)
 
+                                new_index_list[i]['property'][j]['data'].append(
+                                    new_data)
 
                     if not property_found:
                         new_property = {
@@ -1554,7 +1561,7 @@ async def migration():
                             "id": item["property_id"],
                             "name": item["property_name"]
                         }
-                        
+
                         new_index_list[i]['property'].append(new_property)
 
             if not node_found:
@@ -1583,11 +1590,11 @@ async def migration():
                         "name": item["property_name"]
                     }
                 ]
-                
+
                 new_index_list.append(new_index)
 
         tasks = []
-        
+
         for item in new_index_list:
             node_id = item["node_id"]
             index_name = ES_INDEX
@@ -1597,22 +1604,22 @@ async def migration():
             task = index_item(index_name, node_id, body)
             tasks.append(task)
 
-
         await asyncio.gather(*tasks)
-        
+
         items = []
-        
+
         for i in range(len(new_index_list)):
             for j in range(len(new_index_list[i]['property'])):
                 for k in range(len(new_index_list[i]['property'][j]['data'])):
-                    items.append((new_index_list[i]['property'][j]['data'][k]['url'], new_index_list[i]['property'][j]['data'][k]['content']))
-            
+                    items.append((new_index_list[i]['property'][j]['data'][k]['url'],
+                                 new_index_list[i]['property'][j]['data'][k]['content']))
+
         thread = threading.Thread(target=update_keywords, kwargs={
             'items': [item if item[0].startswith(AMAZON_URL) else (AMAZON_URL + item[0], item[1]) for item in [item_ for item_ in items if item_[1]]]})
 
         thread.start()
-        
+
         return jsonify({"status": 200})
-    
+
     except Exception as e:
         abort(500, str(e))
