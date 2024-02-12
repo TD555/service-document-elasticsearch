@@ -7,27 +7,21 @@ services:
     ports:
       - 9201:9200
     environment:
-      - xpack.security.enabled=false
-      - discovery.type=single-node
-      - ES_JAVA_OPTS=-Xms2G -Xmx2G
-      - index.refresh_interval = 1s
-      - index.number_of_replicas = 0
+      - cluster.name=docker-cluster
+      - xpack.security.enabled=true
+      - index.refresh_interval = 5s
+      - index.number_of_replicas = 1
       - index.translog.flush_threshold_ops = 50000
       - index.translog.flush_threshold_size = 1.5gb
       - indices.store.throttle.max_bytes_per_sec = 20mb
-
-      - threadpool.bulk.type = fixed
-      - threadpool.bulk.size = 12
-      - threadpool.bulk.queue_size = 200000
-
-      - index.merge.scheduler.max_thread_count = 1
       - search.max_open_scroll_context = 500
       - cluster.routing.allocation.disk.watermark.low = 85%
       - cluster.routing.allocation.disk.watermark.high = 90%
+      - discovery.seed_hosts=localhost
       
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
-
+    
   flask_elastic_app:
     build: 
       context: ./service_for_elasticsearch
