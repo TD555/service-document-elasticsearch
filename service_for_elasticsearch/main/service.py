@@ -25,6 +25,7 @@ from keyword_extraction import keyword_extractor
 
 app = Flask(__name__)
 
+
 # OLD_ES_INDEX = "araks_index_pre"
 # ES_INDEX = "araks_index"
 # AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
@@ -1503,6 +1504,152 @@ async def get__old_list(**search):
     es.clear_scroll(scroll_id=scroll_id)
 
     return jsonify({"docs": documents, "status": 200})
+
+
+async def get_tags(project_id, node_id, property_id, url):
+
+    return es.search(
+        index=ES_INDEX,
+        body={
+            "query": {
+                "bool": {
+                    "must": [
+                        {
+                            "term": {"project_id.keyword": project_id}
+                        },
+                        {
+                            "term": {"node_id.keyword": node_id}
+                        },
+                        {
+                            "nested": {
+                                "path": "property",
+                                "query": {
+                                        "bool": {
+                                            "must": [
+                                                {"term": {
+                                                    "property.id.keyword": property_id}}
+                                            ]
+                                        }
+                                }
+                            }
+                        },
+                        {
+                            "nested": {
+                                "path": "property.data",
+                                "query": {
+                                        "bool": {
+                                            "must": [
+                                                {"term": {
+                                                    "property.data.url.keyword": url}}
+                                            ]
+                                        }
+                                }
+                            }
+                        }
+                    ]
+                }
+            },
+            "_source": ["property.data.keywords"]
+        }
+
+    )
+
+
+async def get_related_docs(keyword):
+
+    return es.search(
+        index=ES_INDEX,
+        body={
+            "_source": {
+                "includes": ["user_id", "project_id", "color", "type_id", "type_name", "node_id", "node_name", "default_image"]
+            },
+            "query": {
+                "nested": {
+                    "inner_hits": {
+                        "_source": [
+                            "property.id",
+                            "property.name",
+                            "property.data_type"
+                        ]
+                    },
+                    "path": "property",
+                    "query": {
+                        "nested": {
+                            "inner_hits": {
+                                "_source": [
+                                    "property.data.url"
+                                ]
+                            },
+                            "path": "property.data",
+                            "query": {
+                                "nested": {
+                                    "path": "property.data.keywords",
+                                    "query": {
+                                        "bool": {
+                                            "must": [
+                                                {
+                                                    "term": {
+                                                        "property.data.keywords.name": keyword
+                                                    }
+                                                }
+                                            ]
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    )
+
+
+@app.route('/generate_tags', methods=["POST"])
+async def generate_tags():
+    try:
+        project_id = request.json['project_id']
+        node_id = request.json['node_id']
+        property_id = request.json['property_id']
+        url = request.json['url']
+    except:
+        abort(422, "Invalid raw data")
+
+    result = (await get_tags(project_id, node_id, property_id, url))['hits']['hits']
+
+    if result:
+        keywords = result[0]['_source']['property'][0]['data'][0]
+        for i, keyword in enumerate(keywords['keywords']):
+            result = (await get_related_docs(keyword['name']))['hits']['hits']
+            keywords['keywords'][i]['count'] = len(result)
+            
+        return jsonify(**keywords, **{'status': 200})
+    else:
+        return jsonify({'keywords': [], 'status': 200})
+
+
+@app.route('/expand_tag', methods=["POST"])
+async def expand_tag():
+    try:
+        keyword = request.json['keyword']
+    except:
+        abort(422, "Invalid raw data")
+    
+    result = (await get_related_docs(keyword))['hits']['hits']
+    
+    data = []
+    
+    for node in result:
+        response_dict = {}
+        response_dict.update(node["_source"])
+        for property in node['inner_hits']["property"]['hits']['hits']:
+            response_dict.update({"property_" + k:v for k,v in property["_source"].items()})
+            for property_data in property['inner_hits']["property.data"]['hits']['hits']:
+                response_dict.update(property_data["_source"])
+        data.append(response_dict)
+
+    return jsonify({'data' : data,'status': 200})
 
 
 @app.route("/migrate", methods=["GET"])
