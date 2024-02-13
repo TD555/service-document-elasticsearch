@@ -106,7 +106,7 @@ def extract(URL, doc_text):
                         re.sub(sub_pattern, r'\1',
                             doc[i+1].text.strip())
 
-                if ' ' in comp_text.strip() and comp_text.strip() and not re.compile(et_al_pattern).match(comp_text.strip()) and not all(token.strip().lower() in sw_s_en for token in comp_text.split()):
+                if ' ' in comp_text.strip() and comp_text.strip() and not re.compile(et_al_pattern).match(comp_text.strip()) and not all(token.strip().lower() in sw_s_en for token in comp_text.split()) and any(len(token.strip()) > 1 for token in comp_text.split()):
                     compound_nouns[comp_text.strip().title()] += 1
                     i += 1
                     continue

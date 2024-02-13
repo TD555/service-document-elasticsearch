@@ -8,7 +8,9 @@ services:
       - 9201:9200
     environment:
       - cluster.name=docker-cluster
+      - node.name=elasticsearch1
       - xpack.security.enabled=true
+      - bootstrap.memory_lock=true
       - index.refresh_interval = 5s
       - index.number_of_replicas = 1
       - index.translog.flush_threshold_ops = 50000
@@ -17,8 +19,13 @@ services:
       - search.max_open_scroll_context = 500
       - cluster.routing.allocation.disk.watermark.low = 85%
       - cluster.routing.allocation.disk.watermark.high = 90%
-      - discovery.seed_hosts=localhost
-      
+      - discovery.seed_hosts=[]
+      # - cluster.initial_master_nodes=elasticsearch1
+      - path.data=/usr/share/elasticsearch/data
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
     
