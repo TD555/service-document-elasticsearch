@@ -32,8 +32,8 @@ app = Flask(__name__)
 # ES_HOST = "http://localhost:9201/"
 
 
-OLD_ES_INDEX = os.environ['ELASTICSEARCH_OLD_INDEX']
-ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
 AMAZON_URL = os.environ['AMAZON_URL']
 ES_HOST = os.environ['ELASTICSEARCH_URL']
 
