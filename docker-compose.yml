@@ -40,8 +40,8 @@ services:
     environment:
       PYTHONUNBUFFERED: 0
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
-      ELASTICSEARCH_OLD_INDEX: 'araks_index'
-      ELASTICSEARCH_INDEX: 'araks_index_v2'
+      ELASTICSEARCH_INDEX: 'araks_index'
+      ELASTICSEARCH_NEW_INDEX: 'araks_index_v_2'
       AMAZON_URL: 'https://araks-projects-develop.s3.amazonaws.com/'
 
     restart: always
