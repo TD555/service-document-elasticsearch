@@ -9,7 +9,7 @@ services:
     environment:
       - cluster.name=docker-cluster
       - node.name=elasticsearch1
-      - xpack.security.enabled=true
+      - xpack.security.enabled=false
       - bootstrap.memory_lock=true
       - index.refresh_interval = 5s
       - index.number_of_replicas = 1
@@ -40,8 +40,8 @@ services:
     environment:
       PYTHONUNBUFFERED: 0
       ELASTICSEARCH_URL: "http://elasticsearch:9200"
-      ELASTICSEARCH_OLD_INDEX: 'araks_index'
-      ELASTICSEARCH_INDEX: 'araks_index_v2'
+      ELASTICSEARCH_INDEX: 'araks_index'
+      ELASTICSEARCH_NEW_INDEX: 'araks_index_v_2'
       AMAZON_URL: 'https://araks-projects-develop.s3.amazonaws.com/'
 
     restart: always
