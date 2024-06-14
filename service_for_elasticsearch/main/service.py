@@ -1579,15 +1579,15 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                 id_data['authors'] = [
                     {
                         "affiliation": author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"],
-                        'name': (author['ForeName'] + ', ' + author['LastName'])[:50],
-                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
+                        'name': (author['ForeName'] + ' ' + author['LastName'])[:50],
+                        'id': uuid.uuid5(namespace, (author['ForeName'] + ' ' + author['LastName'] + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
                     }
                     if isinstance(author.get('AffiliationInfo'), dict)
                     else
                     {
                         "affiliation": ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
-                        'name': (author['ForeName'] + ', ' + author['LastName'])[:50],
-                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
+                        'name': (author['ForeName'] + ' ' + author['LastName'])[:50],
+                        'id': uuid.uuid5(namespace, (author['ForeName'] + ' ' + author['LastName'] + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
                     }
                     for author in authors
                 ]
