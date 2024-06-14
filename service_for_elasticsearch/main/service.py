@@ -291,9 +291,8 @@ async def create_or_update():
     except:
         abort(422, "Invalid raw data")
 
-    all_docs = await get_list(node_id = data_dict["node_id"], property_id = data_dict["property_id"])
-    
-    
+    all_docs = await get_list(node_id=data_dict["node_id"], property_id=data_dict["property_id"])
+
     id_dict = {"doc_ids": defaultdict(list)}
     for item in all_docs.json["docs"]:
         id_dict["doc_ids"][item["path"]].append(
@@ -313,7 +312,7 @@ async def create_or_update():
     data_dict["id_dict"] = id_dict
 
     returned_jsons = []
-    
+
     for item in remove_duplicates(nodes_data):
         result = {**data_dict, **item}
         returned_jsons.append(upload_document(result))
@@ -651,7 +650,7 @@ async def delete_node():
             ]
         )
     )
-    
+
     if not file_ids:
         return {
             "message": f"No document exists to be deleted."
@@ -1108,8 +1107,9 @@ async def get_list(**search):
 
         for key, value in search.items():
             if value:
-                query['query']['bool']['must'].append({ "term": { key + '.keyword': value }})
-    
+                query['query']['bool']['must'].append(
+                    {"term": {key + '.keyword': value}})
+
     # Use the initial search API to retrieve the first batch of documents and the scroll ID
     try:
         while True:
@@ -1169,11 +1169,12 @@ async def delete(document_id, path):
 
     # Use the delete_by_query API to delete all documents that match the query
     try:
-        response = es.delete_by_query(index=ES_INDEX, body=query, scroll_size=10000)
+        response = es.delete_by_query(
+            index=ES_INDEX, body=query, scroll_size=10000)
 
     except Exception as e:
-        abort(409 , str(e))
-        
+        abort(409, str(e))
+
     if response["deleted"]:
         return {"message": "Document was deleted from database.", "URL": path}
     else:
@@ -1312,12 +1313,14 @@ def convert_date(pubDate):
         "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"
     }
     day = pubDate.get("Day", '01')
-    month = months.get(pubDate["Month"], '01')
+    month = months.get(pubDate.get("Month", '01'), '01')
     year = pubDate["Year"]
     return f"{year}-{month}-{day}"
 
+
 def convert_to_text(item):
     return item.get("#text", "") if isinstance(item, dict) else item
+
 
 async def fetch_with_retry(session, id, retry_attempts=10):
     for attempt in range(retry_attempts):
@@ -1327,49 +1330,55 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                 xml_file = await response.text()
                 xml_data = ET.fromstring(xml_file)
                 xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
-                dict_data = dict(xmltodict.parse(xmlstr))['PubmedArticleSet']['PubmedArticle']['MedlineCitation']
-
+                dict_data = dict(xmltodict.parse(xmlstr))[
+                    'PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+                title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
-                    'id': id,
-                    'articleURL': '',
-                    'source' : 'PubMed',
-                    'title': convert_to_text(dict_data['Article']['ArticleTitle']),
-                    'abstract': convert_to_text(dict_data['Article']['Abstract']["AbstractText"]),
-                    'pubDate': convert_date(dict_data['Article']['Journal']['JournalIssue']['PubDate']),
-                    'language': dict_data['Article'].get('Language', ''),
+                    'article': {
+                        'id': id,
+                        'name' : title[:50],
+                        'article_url': '',
+                        'source': 'PubMed',
+                        'title': title,
+                        'abstract': convert_to_text(dict_data['Article']['Abstract']["AbstractText"]),
+                        'pub_date': convert_date(dict_data['Article']['Journal']['JournalIssue']['PubDate']),
+                        'language': dict_data['Article'].get('Language', '')},
                     'country': dict_data['MedlineJournalInfo'].get('Country', ''),
                 }
 
                 elocation = dict_data['Article'].get('ELocationID')
                 if isinstance(elocation, dict) and elocation.get('@EIdType') == 'doi':
-                    id_data['articleURL'] = 'https://www.doi.org/' + elocation.get('#text', '')
+                    id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                        elocation.get('#text', '')
                 elif isinstance(elocation, list):
                     for eid in elocation:
                         if eid.get('@EIdType') == 'doi':
-                            id_data['articleURL'] = 'https://www.doi.org/' + eid.get('#text', '')
+                            id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                                eid.get('#text', '')
 
-                authors = dict_data['Article']['AuthorList']['Author']
+                authors = dict_data['Article']['AuthorList']['Author'][:20]
                 id_data['authors'] = [
                     {
                         "affiliation": author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"],
-                        'name': author['ForeName'] + ', ' + author['LastName'],
+                        'name': (author['ForeName'] + ', ' + author['LastName'])[:50],
                         'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
                     }
                     if isinstance(author.get('AffiliationInfo'), dict)
                     else
                     {
                         "affiliation": ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
-                        'name': author['ForeName'] + ', ' + author['LastName'],
+                        'name': (author['ForeName'] + ', ' + author['LastName'])[:50],
                         'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
                     }
                     for author in authors
                 ]
 
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
-                id_data['keywords'] = [keyword.get("#text", "") for keyword in keywords] if keywords else []
+                id_data['keywords'] = [keyword.get(
+                    "#text", "") for keyword in keywords] if keywords else []
 
                 return id_data
-            
+
         except aiohttp.ClientError as ce:
             if attempt < retry_attempts - 1:
                 await asyncio.sleep(2 ** attempt)
@@ -1378,7 +1387,7 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                 abort(500, f"Failed to fetch details for ID {id}: {ce}")
         except Exception as e:
             abort(500, f"Error processing ID {id}: {e}")
-        
+
 
 @app.route('/pubmed/get_data', methods=["POST"])
 async def pubmed_preview():
@@ -1391,11 +1400,12 @@ async def pubmed_preview():
 
     async with aiohttp.ClientSession() as session:
         response = await session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=(page-1)*limit))
-        id_list = (await response.json())['esearchresult']['idlist']
+        search_result = (await response.json())['esearchresult']
+        id_list = search_result['idlist']
         await asyncio.sleep(0.1)
         tasks = [fetch_with_retry(session, id) for id in id_list]
         all_data = await asyncio.gather(*tasks)
 
     all_data = [data for data in all_data if data]
 
-    return all_data
+    return {'count' : search_result['count'], 'articles' : all_data}
