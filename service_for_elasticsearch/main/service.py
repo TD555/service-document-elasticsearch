@@ -1358,9 +1358,9 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                     if isinstance(author.get('AffiliationInfo'), dict)
                     else
                     {
-                        "affiliation": ', '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
+                        "affiliation": ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
                         'name': author['ForeName'] + ', ' + author['LastName'],
-                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + ', '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
+                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
                     }
                     for author in authors
                 ]
