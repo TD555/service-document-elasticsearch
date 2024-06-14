@@ -29,7 +29,7 @@ check_ru_pattern = r'[а-яА-Я]+'
 et_al_pattern = r'.*et al.*'
 et_al_pattern_ru = r'.*и др.*'
 keywords_pattern_en = r'K[Ee][Yy]\s*[Ww][Oo][Rr][Dd][Ss]\W*([ [][^\n]*)'
-sub_pattern = r'^[^\w]*(.*?)[^\w]*$'
+sub_pattern = r'^[^\w]*(.*?)[^)\w]*$'
 word_pattern = r'[^\W&&[^0-9]+'
 
 def decontracted(phrase):
@@ -79,6 +79,8 @@ def extract(doc_text):
                     all_keys = [{'name' : key.strip().title(), 'score' : 1.0 } for key in match.group(1).split(',')[:]]
                 elif ';' in match.group(1):
                     all_keys = [{'name' : key.strip().title(), 'score' : 1.0 } for key in match.group(1).split(';')[:]]
+                elif '·' in match.group(1):
+                    all_keys = [{'name' : key.strip().title(), 'score' : 1.0 } for key in match.group(1).split('·')[:]]
                 else: 
                     all_keys = []
             else: 
@@ -90,7 +92,7 @@ def extract(doc_text):
         lang = 'en'
         
     i = 0
-        
+    
     while i < len(doc):
         
         if lang == 'ru':

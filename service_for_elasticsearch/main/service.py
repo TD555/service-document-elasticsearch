@@ -1,8 +1,12 @@
+import xml.etree.ElementTree as ET
+import xmltodict
+import uuid
 from psycopg2.extras import RealDictCursor
 import psycopg2 as ps
 from flask import Flask, jsonify, request, abort
 from elasticsearch import Elasticsearch, ConnectionError, BadRequestError
 import asyncio
+import aiohttp
 from datetime import datetime
 import requests
 from collections import defaultdict
@@ -28,28 +32,28 @@ from keyword_extraction import keyword_extractor
 app = Flask(__name__)
 
 
-# OLD_ES_INDEX = "araks_index_pre"
-# ES_INDEX = "araks_index_v2"
-# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-# ES_HOST = "http://localhost:9201/"
+OLD_ES_INDEX = "araks_index_pre"
+ES_INDEX = "araks_index_v2"
+AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+ES_HOST = "http://localhost:9201/"
 
-# DATABASE_HOST = 'localhost'
-# DATABASE_HOST = 'host.docker.internal'
-# DATABASE_NAME = 'araks_db'
-# DATABASE_USER = 'postgres'
-# DATABASE_PASSWORD = 'Tik.555'
-# DATABASE_PORT = 5433
+DATABASE_HOST = 'localhost'
+DATABASE_HOST = 'host.docker.internal'
+DATABASE_NAME = 'araks_db'
+DATABASE_USER = 'postgres'
+DATABASE_PASSWORD = 'Tik.555'
+DATABASE_PORT = 5433
 
-OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
-ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
-AMAZON_URL = os.environ['AMAZON_URL']
-ES_HOST = os.environ['ELASTICSEARCH_URL']
+# OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+# ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
+# AMAZON_URL = os.environ['AMAZON_URL']
+# ES_HOST = os.environ['ELASTICSEARCH_URL']
 
-DATABASE_NAME = os.environ['DB_NAME']
-DATABASE_USER = os.environ['DB_USER'] 
-DATABASE_HOST = os.environ['DB_HOST']
-DATABASE_PASSWORD = os.environ['DB_PASSWORD']
-DATABASE_PORT = os.environ['DB_PORT']
+# DATABASE_NAME = os.environ['DB_NAME']
+# DATABASE_USER = os.environ['DB_USER']
+# DATABASE_HOST = os.environ['DB_HOST']
+# DATABASE_PASSWORD = os.environ['DB_PASSWORD']
+# DATABASE_PORT = os.environ['DB_PORT']
 
 es = Elasticsearch([ES_HOST])
 
@@ -462,7 +466,8 @@ async def create_or_update():
         my_data = [{k: item[k] for k in item.keys() if k in ['url', 'name']}
                    for item in data]
 
-        amazon_nodes_data = [{'url': check_base_url_exists(item['url']), 'name': item['name']} for item in nodes_data]  # type: ignore
+        amazon_nodes_data = [{'url': check_base_url_exists(
+            item['url']), 'name': item['name']} for item in nodes_data]  # type: ignore
         non_repeat_nodes_data = [
             item for item in amazon_nodes_data if item not in my_data]
         non_repeat_data = [
@@ -490,7 +495,8 @@ async def create_or_update():
 
     elif nodes_data:
 
-        messages.append({'updated': [check_base_url_exists(item['url']) for item in nodes_data], 'deleted': []})
+        messages.append({'updated': [check_base_url_exists(
+            item['url']) for item in nodes_data], 'deleted': []})
 
         await asyncio.gather(*[get_content(item) for item in nodes_data])
 
@@ -1743,6 +1749,107 @@ async def expand_tag():
                 data.append(response_dict.copy())
 
     return jsonify({'data': data, 'status': 200})
+
+
+namespace = uuid.NAMESPACE_DNS
+
+SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}'
+FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml"
+
+
+def convert_date(pubDate):
+    months = {
+        "Jan": "01", "Feb": "02", "Mar": "03", "Apr": "04",
+        "May": "05", "Jun": "06", "Jul": "07", "Aug": "08",
+        "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"
+    }
+    day = pubDate.get("Day", '01')
+    month = months.get(pubDate["Month"], '01')
+    year = pubDate["Year"]
+    return f"{year}-{month}-{day}"
+
+def convert_to_text(item):
+    return item.get("#text", "") if isinstance(item, dict) else item
+
+async def fetch_with_retry(session, id, retry_attempts=10):
+    for attempt in range(retry_attempts):
+        try:
+            async with session.get(FETCH_URL.format(id=id.strip())) as response:
+                response.raise_for_status()
+                xml_file = await response.text()
+                xml_data = ET.fromstring(xml_file)
+                xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
+                dict_data = dict(xmltodict.parse(xmlstr))['PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+
+                id_data = {
+                    'id': id,
+                    'articleURL': '',
+                    'title': convert_to_text(dict_data['Article']['ArticleTitle']),
+                    'abstract': convert_to_text(dict_data['Article']['Abstract']["AbstractText"]),
+                    'pubDate': convert_date(dict_data['Article']['Journal']['JournalIssue']['PubDate']),
+                    'language': dict_data['Article'].get('Language', ''),
+                    'country': dict_data['MedlineJournalInfo'].get('Country', ''),
+                }
+
+                elocation = dict_data['Article'].get('ELocationID')
+                if isinstance(elocation, dict) and elocation.get('@EIdType') == 'doi':
+                    id_data['articleURL'] = 'https://www.doi.org/' + elocation.get('#text', '')
+                elif isinstance(elocation, list):
+                    for eid in elocation:
+                        if eid.get('@EIdType') == 'doi':
+                            id_data['articleURL'] = 'https://www.doi.org/' + eid.get('#text', '')
+
+                authors = dict_data['Article']['AuthorList']['Author']
+                id_data['authors'] = [
+                    {
+                        "affiliation": author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"],
+                        'name': author['ForeName'] + ', ' + author['LastName'],
+                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
+                    }
+                    if isinstance(author.get('AffiliationInfo'), dict)
+                    else
+                    {
+                        "affiliation": ', '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
+                        'name': author['ForeName'] + ', ' + author['LastName'],
+                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + ', '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
+                    }
+                    for author in authors
+                ]
+
+                keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
+                id_data['keywords'] = [keyword.get("#text", "") for keyword in keywords] if keywords else []
+
+                return id_data
+            
+        except aiohttp.ClientError as ce:
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            else:
+                abort(500, f"Failed to fetch details for ID {id}: {ce}")
+        except Exception as e:
+            abort(500, f"Error processing ID {id}: {e}")
+        
+
+@app.route('/pubmed/get_data', methods=["POST"])
+async def pubmed_preview():
+    try:
+        keyword = request.json['keyword']
+        limit = request.json['limit']
+        page = request.json['page']
+    except:
+        abort(422, "Invalid raw data")
+
+    async with aiohttp.ClientSession() as session:
+        response = await session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=(page-1)*limit))
+        id_list = (await response.json())['esearchresult']['idlist']
+        await asyncio.sleep(0.1)
+        tasks = [fetch_with_retry(session, id) for id in id_list]
+        all_data = await asyncio.gather(*tasks)
+
+    all_data = [data for data in all_data if data]
+
+    return all_data
 
 
 

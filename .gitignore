@@ -13,3 +13,4 @@ extract_keywords.ipynb
 service_for_elasticsearch/testing
 service_for_elasticsearch/main/preprocess.py
 service_for_elasticsearch/GUI
+api_test.ipynb
