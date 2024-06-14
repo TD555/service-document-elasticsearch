@@ -29,14 +29,14 @@ from version import __version__, __description__
 
 app = Flask(__name__)
 
-ES_INDEX = "araks_index"
-AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-ES_HOST = "http://localhost:9201/"
+# ES_INDEX = "araks_index"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
 
 
-# ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
-# AMAZON_URL = os.environ['AMAZON_URL']
-# ES_HOST = os.environ['ELASTICSEARCH_URL']
+ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+AMAZON_URL = os.environ['AMAZON_URL']
+ES_HOST = os.environ['ELASTICSEARCH_URL']
 
 
 es = Elasticsearch([ES_HOST])
