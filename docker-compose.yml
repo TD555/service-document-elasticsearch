@@ -8,6 +8,7 @@ services:
       - 9201:9200
     environment:
       - cluster.name=docker-cluster
+      - cluster.initial_master_nodes=elasticsearch1
       - node.name=elasticsearch1
       - xpack.security.enabled=false
       - bootstrap.memory_lock=true
@@ -43,6 +44,11 @@ services:
       ELASTICSEARCH_INDEX: 'araks_index'
       ELASTICSEARCH_NEW_INDEX: 'araks_index_v_2'
       AMAZON_URL: 'https://araks-projects-develop.s3.amazonaws.com/'
+      DB_NAME : 'newaraksdb'
+      DB_USER : 'newaraks_user'   
+      DB_HOST : 46.4.90.250
+      DB_PASSWORD : 'puacX9KK[@mX'
+      DB_PORT : 5432
 
     restart: always
 
