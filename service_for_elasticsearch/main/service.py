@@ -1318,8 +1318,13 @@ def convert_date(pubDate):
     return f"{year}-{month}-{day}"
 
 
-def convert_to_text(item):
-    return item.get("#text", "") if isinstance(item, dict) else item
+def convert_to_text(item, abstract=False):
+    if isinstance(item, dict):
+        return item.get("#text", "")
+    if abstract and isinstance(item, list):
+        text = '\n\n'.join([element["@Label"] + '\n' + element["#text"] for element in item])
+        return text  
+    return item
 
 
 async def fetch_with_retry(session, id, retry_attempts=10):
@@ -1336,11 +1341,11 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                 id_data = {
                     'article': {
                         'id': id,
-                        'name' : title[:50],
+                        'name': title[:50],
                         'article_url': '',
                         'source': 'PubMed',
                         'title': title,
-                        'abstract': convert_to_text(dict_data['Article']['Abstract']["AbstractText"]),
+                        'abstract': convert_to_text(dict_data['Article'].get('Abstract',{'AbstractText' : ''})["AbstractText"], True),
                         'pub_date': convert_date(dict_data['Article']['Journal']['JournalIssue']['PubDate']),
                         'language': dict_data['Article'].get('Language', '')},
                     'country': dict_data['MedlineJournalInfo'].get('Country', ''),
@@ -1355,25 +1360,29 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                         if eid.get('@EIdType') == 'doi':
                             id_data['article']['article_url'] = 'https://www.doi.org/' + \
                                 eid.get('#text', '')
-
-                authors = dict_data['Article']['AuthorList']['Author'][:20]
+                authors = dict_data['Article'].get('AuthorList', {'Author' : []})['Author']
+                if isinstance(authors, list):
+                    authors = authors[:20]
+                else: authors = [authors]
                 id_data['authors'] = [
                     {
                         "affiliation": author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"],
-                        'name': (author['ForeName'] + ' ' + author['LastName'])[:50],
-                        'id': uuid.uuid5(namespace, (author['ForeName'] + ' ' + author['LastName'] + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
+                        'name': (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()[:50],
+                        'id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
                     }
                     if isinstance(author.get('AffiliationInfo'), dict)
                     else
                     {
                         "affiliation": ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
-                        'name': (author['ForeName'] + ' ' + author['LastName'])[:50],
-                        'id': uuid.uuid5(namespace, (author['ForeName'] + ' ' + author['LastName'] + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
+                        'name': (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()[:50],
+                        'id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
                     }
                     for author in authors
                 ]
 
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
+                if not isinstance(keywords, list):
+                    keywords = [keywords]
                 id_data['keywords'] = [keyword.get(
                     "#text", "") for keyword in keywords] if keywords else []
 
@@ -1386,18 +1395,23 @@ async def fetch_with_retry(session, id, retry_attempts=10):
             else:
                 abort(500, f"Failed to fetch details for ID {id}: {ce}")
         except Exception as e:
+            print(f"Error processing ID {id}: {e}")
+            break
             abort(500, f"Error processing ID {id}: {e}")
 
 
 @app.route('/pubmed/get_data', methods=["POST"])
 async def pubmed_preview():
     try:
-        keyword = request.json['keyword']
-        limit = request.json['limit']
-        page = request.json['page']
-    except:
-        abort(422, "Invalid raw data")
-
+        keyword = str(request.json['keyword'])
+        limit = request.json.get('limit', 5)
+        page = int(request.json.get('page', 1))
+    except Exception as e:
+        abort(422, "Invalid raw data. One of the parameters is incorrect. {str(e)}")
+        
+    if len(keyword) < 3:
+            abort(400, "Keyword must be at least 3 characters long")
+            
     async with aiohttp.ClientSession() as session:
         response = await session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=(page-1)*limit))
         search_result = (await response.json())['esearchresult']
@@ -1408,4 +1422,4 @@ async def pubmed_preview():
 
     all_data = [data for data in all_data if data]
 
-    return {'count' : search_result['count'], 'articles' : all_data}
+    return jsonify({'count': search_result['count'], 'articles': all_data})
