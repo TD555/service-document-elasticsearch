@@ -1337,6 +1337,7 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                 xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
                 dict_data = dict(xmltodict.parse(xmlstr))[
                     'PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+                
                 title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
                     'article': {
@@ -1360,6 +1361,7 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                         if eid.get('@EIdType') == 'doi':
                             id_data['article']['article_url'] = 'https://www.doi.org/' + \
                                 eid.get('#text', '')
+                                
                 authors = dict_data['Article'].get('AuthorList', {'Author' : []})['Author']
                 if isinstance(authors, list):
                     authors = authors[:20]
@@ -1377,9 +1379,9 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                         'name': (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()[:50],
                         'id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
                     }
-                    for author in authors
+                    for author in authors if (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()
                 ]
-
+                
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
                 if not isinstance(keywords, list):
                     keywords = [keywords]
