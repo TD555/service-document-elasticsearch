@@ -29,10 +29,6 @@ from version import __version__, __description__
 
 app = Flask(__name__)
 
-# ES_INDEX = "araks_index"
-# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-# ES_HOST = "http://localhost:9201/"
-
 
 ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
 AMAZON_URL = os.environ['AMAZON_URL']
@@ -288,8 +284,8 @@ async def create_or_update():
         # if (not data_dict['default_image'].startswith(AMAZON_URL)) and (data_dict['default_image']):
         #     data_dict['default_image'] = AMAZON_URL + data_dict['default_image']
 
-    except:
-        abort(422, "Invalid raw data")
+    except Exception as e:
+        abort(422, f"Invalid raw data: {str(e)}")
 
     all_docs = await get_list(node_id=data_dict["node_id"], property_id=data_dict["property_id"])
 
@@ -637,8 +633,8 @@ async def delete_node():
         node_id = request.json.get("node_id", None)
         property_id = request.json.get("property_id", None)
 
-    except:
-        abort(422, "Invalid raw data")
+    except Exception as e:
+        abort(422, f"Invalid raw data: {str(e)}")
 
     all_docs = await get_list(project_id=project_id, node_id=node_id, property_id=property_id)
 
@@ -830,8 +826,8 @@ def get_page():
         sortOrder = request.json["sortOrder"]
         sortField = request.json["sortField"]
 
-    except:
-        abort(422, "Invalid raw data")
+    except Exception as e:
+        abort(422, f"Invalid raw data: {str(e)}")
 
     if len(keyword.strip()) < 3:
         abort(422, "Search terms must contain at least 3 characters")
@@ -1341,7 +1337,7 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                 title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
                     'article': {
-                        'id': id,
+                        'article_id': id,
                         'name': title[:50],
                         'article_url': '',
                         'source': 'PubMed',
@@ -1370,14 +1366,14 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                     {
                         "affiliation": author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"],
                         'name': (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()[:50],
-                        'id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
+                        'author_id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
                     }
                     if isinstance(author.get('AffiliationInfo'), dict)
                     else
                     {
                         "affiliation": ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
                         'name': (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()[:50],
-                        'id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
+                        'author_id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
                     }
                     for author in authors if (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()
                 ]
@@ -1402,6 +1398,22 @@ async def fetch_with_retry(session, id, retry_attempts=10):
             abort(500, f"Error processing ID {id}: {e}")
 
 
+async def search_with_retry(session, keyword, limit, offset, retry_attempts=10):
+    for attempt in range(retry_attempts):
+        try:
+            async with session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=offset)) as response:
+                response.raise_for_status()
+                return await response.json()
+        except aiohttp.ClientError as ce:
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            else:
+                abort(500, f"Failed to search for keyword {keyword}: {ce}")
+        except Exception as e:
+            print(f"Error processing keyword {keyword}: {e}")
+            abort(500, f"Error processing keyword {keyword}: {e}")
+
 @app.route('/pubmed/get_data', methods=["POST"])
 async def pubmed_preview():
     try:
@@ -1409,19 +1421,18 @@ async def pubmed_preview():
         limit = request.json.get('limit', 5)
         page = int(request.json.get('page', 1))
     except Exception as e:
-        abort(422, "Invalid raw data. One of the parameters is incorrect. {str(e)}")
+        abort(422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
         
     if len(keyword) < 3:
-            abort(400, "Keyword must be at least 3 characters long")
+        abort(400, "Keyword must be at least 3 characters long")
             
     async with aiohttp.ClientSession() as session:
-        response = await session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=(page-1)*limit))
-        search_result = (await response.json())['esearchresult']
-        id_list = search_result['idlist']
+        search_result = await search_with_retry(session, keyword, limit, (page-1)*limit)
+        id_list = search_result['esearchresult']['idlist']
         await asyncio.sleep(0.1)
         tasks = [fetch_with_retry(session, id) for id in id_list]
         all_data = await asyncio.gather(*tasks)
 
     all_data = [data for data in all_data if data]
 
-    return jsonify({'count': search_result['count'], 'articles': all_data})
+    return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
