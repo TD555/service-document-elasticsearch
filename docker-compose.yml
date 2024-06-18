@@ -21,7 +21,6 @@ services:
       - cluster.routing.allocation.disk.watermark.low = 85%
       - cluster.routing.allocation.disk.watermark.high = 90%
       - discovery.seed_hosts=[]
-      # - cluster.initial_master_nodes=elasticsearch1
       - path.data=/usr/share/elasticsearch/data
     ulimits:
       memlock:
@@ -40,15 +39,9 @@ services:
       - 8590:5000
     environment:
       PYTHONUNBUFFERED: 0
-      ELASTICSEARCH_URL: "http://elasticsearch:9200"
-      ELASTICSEARCH_INDEX: 'araks_index'
-      ELASTICSEARCH_NEW_INDEX: 'araks_index_v_2'
-      AMAZON_URL: 'https://araks-projects-develop.s3.amazonaws.com/'
-      DB_NAME : 'newaraksdb'
-      DB_USER : 'newaraks_user'   
-      DB_HOST : 46.4.90.250
-      DB_PASSWORD : 'puacX9KK[@mX'
-      DB_PORT : 5432
+      ELASTICSEARCH_URL: ${ELASTICSEARCH_URL}
+      ELASTICSEARCH_INDEX: ${ELASTICSEARCH_INDEX}
+      AMAZON_URL: ${AMAZON_URL}
 
     restart: always
 
