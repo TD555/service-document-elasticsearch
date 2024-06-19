@@ -29,13 +29,13 @@ from version import __version__, __description__
 
 app = Flask(__name__)
 
-ES_INDEX = "araks_index"
-AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-ES_HOST = "http://localhost:9201/"
+# ES_INDEX = "araks_index"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
 
-# ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
-# AMAZON_URL = os.environ['AMAZON_URL']
-# ES_HOST = os.environ['ELASTICSEARCH_URL']
+ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+AMAZON_URL = os.environ['AMAZON_URL']
+ES_HOST = os.environ['ELASTICSEARCH_URL']
 
 
 es = Elasticsearch([ES_HOST])
@@ -1301,8 +1301,8 @@ async def get_scheme():
 
 namespace = uuid.NAMESPACE_DNS
 
-SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}'
-FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml"
+SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509'
+FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509"
 
 
 def convert_date(pubDate):
