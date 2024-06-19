@@ -33,10 +33,28 @@ app = Flask(__name__)
 # AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
 # ES_HOST = "http://localhost:9201/"
 
-ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+# OLD_ES_INDEX = "araks_index_pre"
+# ES_INDEX = "araks_index_v2"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
+
+# DATABASE_HOST = 'localhost'
+# # DATABASE_HOST = 'host.docker.internal'
+# DATABASE_NAME = 'araks_db'
+# DATABASE_USER = 'postgres'
+# DATABASE_PASSWORD = 'Tik.555'
+# DATABASE_PORT = 5433
+
+OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
 AMAZON_URL = os.environ['AMAZON_URL']
 ES_HOST = os.environ['ELASTICSEARCH_URL']
 
+DATABASE_NAME = os.environ['DB_NAME']
+DATABASE_USER = os.environ['DB_USER']
+DATABASE_HOST = os.environ['DB_HOST']
+DATABASE_PASSWORD = os.environ['DB_PASSWORD']
+DATABASE_PORT = os.environ['DB_PORT']
 
 es = Elasticsearch([ES_HOST])
 
@@ -56,8 +74,31 @@ put_data = {
     },
     "mappings": {
         "properties": {
-            "created": {"type": "date", "format": "yyyy-MM-dd HH:mm:ss"},
-            "page_content": {"type": "text", "analyzer": "my_analyzer"},
+            'property':
+                {
+                    'type': 'nested',
+                    'properties': {
+                        'name': {'type': 'text'},
+                        'data_type': {'type': 'text'},
+                        'data': {
+                            'type': 'nested',
+                            'properties': {
+                                'content': {"type": "text", "analyzer": "my_analyzer"},
+                                "created": {"type": "date", "format": "yyyy-MM-dd HH:mm:ss"},
+                                "keywords": {
+                                    'type': 'nested',
+                                    'properties': {
+                                        'name': {"type": "keyword"},
+                                        'score': {'type': 'half_float'}
+                                    }
+                                },
+                                "url": {
+                                    "type": "keyword"
+                                },
+                            }
+                        }
+                    }
+                }
         }
     },
 }
@@ -348,6 +389,123 @@ async def upload_document(data):
     except:
         return {"message": f"Invalid key names in nodes_data"}
 
+    existing_document = es.get(index=ES_INDEX, id=node_id, ignore=404)
+
+    if existing_document and existing_document["found"]:
+        # Document with the same node_id and property_id exists, update it
+
+        result = (await check_nested_field(path='property', nested_field='id', value=property_id))['hits']['hits']
+
+        if result:
+            data = ([item['data'] for item in result[0]['_source']
+                    ['property'] if item['id'] == property_id][0])
+
+        else:
+            data = []
+
+        my_data = [{k: item[k] for k in item.keys() if k in ['url', 'name']}
+                   for item in data]
+
+        amazon_nodes_data = [{'url': check_base_url_exists(
+            item['url']), 'name': item['name']} for item in nodes_data]  # type: ignore
+        non_repeat_nodes_data = [
+            item for item in amazon_nodes_data if item not in my_data]
+        non_repeat_data = [
+            item for item in my_data if item not in amazon_nodes_data]  # type: ignore
+
+        if non_repeat_nodes_data:
+            await asyncio.gather(*[get_content(item) for item in non_repeat_nodes_data])
+
+        if non_repeat_nodes_data or non_repeat_data:
+            await update_docs(newData=[{i: item[i] for i in item if i != 'org_content'} for item in non_repeat_nodes_data], oldData=non_repeat_data, node_id=node_id, property_id=property_id, property_name=property_name, data_type=data_type)
+
+        if non_repeat_data:
+            es.indices.refresh(index=ES_INDEX)
+            await delete_empty_docs()
+
+        messages.append({
+            'updated': [item['url'] for item in non_repeat_nodes_data],
+            'deleted': [item['url'] for item in non_repeat_data]
+        })
+
+        thread = threading.Thread(target=update_keywords, kwargs={
+            'items': [(check_base_url_exists(item['url']), item['org_content']) for item in [item_ for item_ in non_repeat_nodes_data if item_['content']]]})
+
+        thread.start()
+
+    elif nodes_data:
+
+        messages.append({'updated': [check_base_url_exists(
+            item['url']) for item in nodes_data], 'deleted': []})
+
+        await asyncio.gather(*[get_content(item) for item in nodes_data])
+
+        document_data = {**{'project_id': project_id, 'user_id': user_id, 'color': color, 'type_id': type_id, 'type_name': type_name, 'node_id': node_id,
+                            'node_name': node_name, 'default_image': default_image}, **{'property': [{'id': property_id, 'name': property_name, 'data_type': data_type, 'data': [{i: item[i] for i in item if i != 'org_content'} for item in nodes_data]}]}}
+
+        # Document does not exist, create a new one
+
+        await index_item(index=ES_INDEX,
+                         id=node_id,
+                         body=document_data)
+
+        thread = threading.Thread(target=update_keywords, kwargs={
+            'items': [(check_base_url_exists(item['url']), item['org_content']) for item in [item_ for item_ in nodes_data if item_['content']]]})
+
+        thread.start()
+
+    return jsonify({"status": 200, 'message': messages})
+
+
+def update_keywords(items):
+
+    for url, text in items:
+
+        es.indices.refresh(index=ES_INDEX)
+        
+        if text.strip():
+            es.update_by_query(
+                index=ES_INDEX,
+                body={
+                    "query": {
+                        "nested": {
+                            "path": "property.data",
+                            "query": {
+                                "bool": {
+                                    "must": [
+                                    ]
+                                }
+                            }
+                        }
+                    },
+                    "script": {
+                        "source": "for (int i = 0; i < ctx._source.property.size(); i++) {for (int j = 0; j < ctx._source.property[i].data.size(); j++) {if (ctx._source.property[i].data[j].url == params.path) {def newKeyword = params.keywords ; ctx._source.property[i].data[j].keywords = newKeyword;}}}",
+                        "params": {
+                            "path": url,
+                            "keywords": keyword_extractor.extract(text)
+                        }
+                    }
+                }
+            )
+            es.indices.refresh(index=ES_INDEX)
+
+
+async def get_time_now():
+    current_utc_time = datetime.utcnow()
+    gmt_plus_4_time = current_utc_time.replace(
+        tzinfo=pytz.utc).astimezone(gmt_plus_4)
+
+    return gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
+
+
+async def get_content(item):
+
+    path = check_base_url_exists(item['url'])
+    filename = os.path.basename(path)
+    file = None
+
+    # if not path.startswith(AMAZON_URL):
+    #     path = AMAZON_URL + path
     try:
         start = time.time()
         file = await asyncio.wait_for(
@@ -952,81 +1110,56 @@ def get_page():
     while hits:
         # Scroll to the next batch of results
         for hit in hits:
-            if (
-                "highlight" in hit.keys()
-                and hit["_source"]["project_id"] == project_id
-                and (hit["_source"]["type_id"] in list_type_id or not list_type_id)
-            ):
-                if (
-                    hit["_source"]["path"],
-                    hit["_source"]["node_id"],
-                ) not in sentences.keys():
-                    sentences[
-                        (hit["_source"]["path"], hit["_source"]["node_id"])
-                    ] = defaultdict(int)
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "match_count"
-                    ] = 0
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "match_filename"
-                    ] = hit["highlight"].get("filename", [""])[0]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "node_id"
-                    ] = hit["_source"]["node_id"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "project_id"
-                    ] = hit["_source"]["project_id"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "user_id"
-                    ] = hit["_source"]["user_id"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "type_id"
-                    ] = hit["_source"]["type_id"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "node_id"
-                    ] = hit["_source"]["node_id"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "property_id"
-                    ] = hit["_source"]["property_id"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "type_name"
-                    ] = hit["_source"]["type_name"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "node_name"
-                    ] = hit["_source"]["node_name"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "property_name"
-                    ] = hit["_source"]["property_name"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "filename"
-                    ] = hit["_source"]["filename"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "default_image"
-                    ] = hit["_source"]["default_image"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "color"
-                    ] = hit["_source"]["color"]
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "created"
-                    ] = hit["_source"]["created"]
-                if (
-                    hit["highlight"].get("page_content", [""])[0]
-                    and "match_content"
-                    not in sentences[
-                        (hit["_source"]["path"], hit["_source"]["node_id"])
-                    ]
-                ):
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "match_content"
-                    ] = (hit["highlight"].get("page_content", [""])[0].strip())
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "page"
-                    ] = hit["_source"]["page"]
-                for content in hit["highlight"].get("page_content", []):
-                    # print(re.findall(r"<em>(.*?)</em>", content))
-                    sentences[(hit["_source"]["path"], hit["_source"]["node_id"])][
-                        "match_count"
-                    ] += int(len(re.findall(r"<em>(.*?)</em>", content)))
+            if project_id != hit['_source']['project_id'] or not (hit["_source"]["type_id"] in list_type_id or not list_type_id):
+                continue
+
+            property_dict = {"user_id": hit['_source']['user_id'],
+                             "project_id": hit['_source']['project_id'],
+                             "type_id": hit['_source']['type_id'],
+                             "type_name": hit['_source']['type_name'],
+                             "color": hit['_source']['color'],
+                             "default_image": hit['_source']['default_image'],
+                             "node_id": hit['_source']['node_id'],
+                             "node_name": hit['_source']['node_name']
+                             }
+            for property_hit in hit['inner_hits']['property']['hits']['hits']:
+
+                property_dict['property_id'] = property_hit['_source']['id']
+                property_dict['property_name'] = property_hit['_source']['name']
+                property_dict['data_type'] = property_hit['_source']['data_type']
+                property_dict['data'] = []
+
+                for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
+                    data_dict = {}
+                    data_dict["path"] = check_base_url_exists(
+                        data_hit['_source']['url'])
+                    data_dict["match_count"] = 0
+
+                    if 'highlight' in data_hit:
+                        data_dict["match_content"] = data_hit['highlight'].get(
+                            'property.data.content')[0].strip()
+                        for content in data_hit['highlight'].get(
+                                'property.data.content'):
+                            data_dict["match_count"] += int(
+                                len(re.findall(r"<em>(.*?)</em>", content)))
+                    else:
+                        data_dict["match_content"] = ''
+
+                    if property_hit["inner_hits"]['data_name']['hits']['hits']:
+                        if 'highlight' in property_hit["inner_hits"]['data_name']['hits']['hits'][i]:
+                            data_dict["match_filename"] = property_hit["inner_hits"]['data_name']['hits']['hits'][i]['highlight'].get(
+                                'property.data.name', [''])[0].strip()
+                        else:
+                            data_dict["match_filename"] = ''
+                    else:
+                        data_dict["match_filename"] = ''
+
+                    data_dict["created"] = data_hit['_source']['created']
+                    data_dict["filename"] = data_hit['_source']['name']
+
+                    property_dict['data'].append(data_dict)
+
+                rows.append(property_dict.copy())
 
         scroll_id = result.get("_scroll_id")
         try:
@@ -1299,6 +1432,280 @@ async def get_scheme():
     return jsonify({"text": input_sentence, "status": 200})
 
 
+@app.route("/get__old_list", methods=["GET"])
+async def get__old_list(**search):
+
+    if not search:
+        query = {"query": {"match_all": {}}, "size": 10000}
+
+    else:
+        query = {
+            "query": {
+                "bool": {
+                    "must": [
+                    ]
+                }
+            }, "size": 10000}
+
+        for key, value in search.items():
+            if value:
+                query['query']['bool']['must'].append(
+                    {"term": {key + '.keyword': value}})
+
+    # Use the initial search API to retrieve the first batch of documents and the scroll ID
+    try:
+        while True:
+            if es.indices.exists(index=OLD_ES_INDEX):
+                initial_search = es.search(
+                    index=OLD_ES_INDEX, body=query, scroll="1m")
+                break
+            else:
+                continue
+
+    except Exception as e:
+        abort(500, str(e))
+
+    scroll_id = initial_search["_scroll_id"]
+    total_results = initial_search["hits"]["total"]["value"]
+
+    # Iterate through the batches of results using the Scroll API
+    documents = []
+    while total_results > 0:
+        for hit in initial_search["hits"]["hits"]:
+            document = {
+                "filename": hit["_source"]["filename"],
+                "doc_id": hit["_source"]["doc_id"],
+                "user_id": hit["_source"]["user_id"],
+                "type_id": hit["_source"]["type_id"],
+                "type_name": hit["_source"]["type_name"],
+                "property_id": hit["_source"]["property_id"],
+                "property_name": hit["_source"]["property_name"],
+                "page": hit["_source"]["page"],
+                "page_content": hit["_source"]["page_content"],
+                "created": hit["_source"]["created"],
+                "project_id": hit["_source"]["project_id"],
+                "node_id": hit["_source"]["node_id"],
+                "node_name": hit["_source"]["node_name"],
+                "default_image": hit["_source"]["default_image"],
+                "color": hit["_source"]["color"],
+                "path": hit["_source"]["path"],
+            }
+            documents.append(document)
+
+        # Perform the next scroll request
+        initial_search = es.scroll(scroll_id=scroll_id, scroll="1s")
+        scroll_id = initial_search["_scroll_id"]
+        total_results -= len(initial_search["hits"]["hits"])
+        if len(initial_search["hits"]["hits"]) == 0:
+            break
+
+    # Clear the scroll context when done
+    es.clear_scroll(scroll_id=scroll_id)
+
+    return jsonify({"docs": documents, "status": 200})
+
+
+async def get_tags(url, project_id=None, node_id=None, property_id=None):
+    query_body = {
+        "query": {
+            "nested": {
+                "path": "property.data",
+                "query": {
+                    "bool": {
+                        "must": [
+                            {
+                                "term": {
+                                    "property.data.url": url
+                                }
+                            }
+                        ]
+                    }
+                },
+                "inner_hits": {"_source": ["property.data.keywords"]}
+            }
+        }
+    }
+
+    # Optional filters (uncomment if needed)
+    if project_id:
+        query_body["query"]["bool"]["must"].append(
+            {"term": {"project_id.keyword": project_id}})
+    if node_id:
+        query_body["query"]["bool"]["must"].append(
+            {"term": {"node_id.keyword": node_id}})
+    if property_id:
+        query_body["query"]["bool"]["must"].append({
+            "nested": {
+                "path": "property",
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"property.id.keyword": property_id}}
+                        ]
+                    }
+                }
+            }
+        })
+
+    response = es.search(index=ES_INDEX, body=query_body)
+
+    return response
+
+
+async def get_related_docs(keyword, url):
+    return es.search(
+        index=ES_INDEX,
+        body={
+            "_source": {
+                "includes": ["user_id", "project_id", "color", "type_id", "type_name", "node_id", "node_name", "default_image"]
+            },
+            "query": {
+                "nested": {
+                    "inner_hits": {
+                        "_source": [
+                            "property.id",
+                            "property.name",
+                            "property.data_type"
+                        ]
+                    },
+                    "path": "property",
+                    "query": {
+                        "nested": {
+                            "inner_hits": {
+                                "_source": [
+                                    "property.data.url",
+                                    "property.data.name"
+                                ]
+                            },
+                            "path": "property.data",
+                            "query": {
+                                "bool": {
+                                    "must": [
+                                        {
+                                            "nested": {
+                                                "path": "property.data.keywords",
+                                                "query": {
+                                                    "bool": {
+                                                        "must": [
+                                                            {
+                                                                "term": {
+                                                                    "property.data.keywords.name": keyword
+                                                                }
+                                                            }
+                                                        ]
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    ],
+                                    "must_not": [
+                                        {
+                                            "term": {
+                                                "property.data.url": url
+                                            }
+                                        }
+                                    ]
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+    )
+
+
+@app.route('/generate_tags', methods=["POST"])
+async def generate_tags():
+    try:
+        # project_id = request.json['project_id']
+        # node_id = request.json['node_id']
+        # property_id = request.json['property_id']
+        url = request.json['url']
+    except:
+        abort(422, "Invalid raw data")
+
+    result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
+    all_dict = defaultdict(list)
+    if result:
+        keywords = result[0]['_source']
+        for i, keyword in enumerate(keywords['keywords']):
+            result = (await get_related_docs(keyword['name'], url))['hits']['hits']
+            for node in result:
+                for property in node['inner_hits']["property"]['hits']['hits']:
+                    all_dict[keyword['name']] = [property_data["_source"]['url']
+                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']]
+            keywords['keywords'][i]['count'] = len(all_dict[keyword['name']])
+
+        all_urls = []
+
+        for urls in all_dict.values():
+            all_urls.extend(urls)
+
+        return jsonify(**keywords, **{'all_length': len(set(all_urls))}, **{'url': url}, **{'status': 200})
+    else:
+        return jsonify({'keywords': [], 'all_length': 0, 'url': url, 'status': 200})
+
+
+@app.route('/similar_docs', methods=["POST"])
+async def get_similar_docs():
+    try:
+        # project_id = request.json['project_id']
+        # node_id = request.json['node_id']
+        # property_id = request.json['property_id']
+        url = request.json['url']
+    except:
+        abort(422, "Invalid raw data")
+
+    result = (await get_tags(url))['hits']['hits']
+    data = []
+
+    if result:
+        keywords = result[0]['_source']['property'][0]['data'][0]
+        for _, keyword in enumerate(keywords['keywords']):
+            result = (await get_related_docs(keyword['name'], url))['hits']['hits']
+            for node in result:
+                response_dict = {}
+                response_dict.update(node["_source"])
+                for property in node['inner_hits']["property"]['hits']['hits']:
+                    response_dict.update(
+                        {"property_" + k: v for k, v in property["_source"].items()})
+                    for property_data in property['inner_hits']["property.data"]['hits']['hits']:
+                        response_dict.update(property_data["_source"])
+                        if response_dict not in data:
+                            data.append(response_dict.copy())
+
+        return jsonify(**{'data': data}, **{'status': 200})
+    else:
+        return jsonify({'data': [], 'status': 200})
+
+
+@app.route('/expand_tag', methods=["POST"])
+async def expand_tag():
+    try:
+        keyword = request.json['keyword']
+        url = request.json['url']
+    except:
+        abort(422, "Invalid raw data")
+
+    result = (await get_related_docs(keyword, url))['hits']['hits']
+
+    data = []
+
+    for node in result:
+        response_dict = {}
+        response_dict.update(node["_source"])
+        for property in node['inner_hits']["property"]['hits']['hits']:
+            response_dict.update(
+                {"property_" + k: v for k, v in property["_source"].items()})
+            for property_data in property['inner_hits']["property.data"]['hits']['hits']:
+                response_dict.update(property_data["_source"])
+                data.append(response_dict.copy())
+
+    return jsonify({'data': data, 'status': 200})
+
+
 namespace = uuid.NAMESPACE_DNS
 
 SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509'
@@ -1317,13 +1724,8 @@ def convert_date(pubDate):
     return f"{year}-{month}-{day}"
 
 
-def convert_to_text(item, abstract=False):
-    if isinstance(item, dict):
-        return item.get("#text", "")
-    if abstract and isinstance(item, list):
-        text = '\n\n'.join([element["@Label"] + '\n' + element["#text"] for element in item])
-        return text  
-    return item
+def convert_to_text(item):
+    return item.get("#text", "") if isinstance(item, dict) else item
 
 
 async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
@@ -1334,8 +1736,9 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
                 xml_file = await response.text()
                 xml_data = ET.fromstring(xml_file)
                 xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
-                dict_data = dict(xmltodict.parse(xmlstr))['PubmedArticleSet']['PubmedArticle']['MedlineCitation']
-                
+                dict_data = dict(xmltodict.parse(xmlstr))[
+                    'PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+
                 title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
                     'article': {
@@ -1353,13 +1756,16 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
 
                 elocation = dict_data['Article'].get('ELocationID')
                 if isinstance(elocation, dict) and elocation.get('@EIdType') == 'doi':
-                    id_data['article']['article_url'] = 'https://www.doi.org/' + elocation.get('#text', '')
+                    id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                        elocation.get('#text', '')
                 elif isinstance(elocation, list):
                     for eid in elocation:
                         if eid.get('@EIdType') == 'doi':
-                            id_data['article']['article_url'] = 'https://www.doi.org/' + eid.get('#text', '')
+                            id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                                eid.get('#text', '')
 
-                authors = dict_data['Article'].get('AuthorList', {'Author': []})['Author']
+                authors = dict_data['Article'].get(
+                    'AuthorList', {'Author': []})['Author']
                 if isinstance(authors, list):
                     authors = authors[:20]
                 else:
@@ -1383,7 +1789,8 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
                 if not isinstance(keywords, list):
                     keywords = [keywords]
-                id_data['keywords'] = [keyword.get("#text", "") for keyword in keywords] if keywords else []
+                id_data['keywords'] = [keyword.get(
+                    "#text", "") for keyword in keywords] if keywords else []
 
                 return id_data
 
@@ -1398,6 +1805,7 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
             print(f"Error processing ID {id}: {e}")
             break
             abort(500, f"Error processing ID {id}: {e}")
+
 
 async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
@@ -1416,12 +1824,158 @@ async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, 
             print(f"Error processing keyword {keyword}: {e}")
             abort(500, f"Error processing keyword {keyword}: {e}")
 
+
 @app.route('/pubmed/get_data', methods=["POST"])
 async def pubmed_preview():
     try:
         keyword = str(request.json['keyword'])
         limit = request.json.get('limit', 5)
         page = int(request.json.get('page', 1))
+    except Exception as e:
+        abort(
+            422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
+
+    if len(keyword) < 3:
+        abort(400, "Keyword must be at least 3 characters long")
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            search_result = await asyncio.wait_for(search_with_retry(session, keyword, limit, (page-1)*limit), timeout=10)
+            id_list = search_result['esearchresult']['idlist']
+            await asyncio.sleep(0.1)
+
+            tasks = [fetch_with_retry(session, id) for id in id_list]
+            all_data = await asyncio.gather(*[asyncio.wait_for(task, timeout=20) for task in tasks])
+
+        all_data = [data for data in all_data if data]
+
+        return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
+    except asyncio.TimeoutError:
+        abort(500, "The request timed out. Please try again later.")
+
+
+get_all_query = """SELECT np.user_id, np.project_id, n.project_type_id as type_id, pnt.name as type_name, pnt.color as color, np.node_id, n.name as node_name, n.default_image, np.project_type_property_id as property_id, pntp.name as property_name, 'doc' AS type, np.nodes_data, np.created_at as created
+FROM public.node_properties as np
+LEFT JOIN nodes as n
+ON n.id = node_id
+LEFT JOIN project_node_types as pnt
+ON n.project_type_id = pnt.id
+LEFT JOIN projects_node_type_property as pntp
+ON np.project_type_property_id = pntp.id
+WHERE project_type_property_type='document' and nodes_data not in ('[]', '[{}]');"""
+
+
+@app.route("/migrate", methods=["GET"])
+async def migration():
+
+    conn = ps.connect(dbname=DATABASE_NAME, user=DATABASE_USER,
+                      password=DATABASE_PASSWORD, port=DATABASE_PORT, host=DATABASE_HOST)
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute(get_all_query)
+
+    all_data = cur.fetchall()
+
+    old_data = [{k: v for k, v in data.items()} for data in all_data]
+    try:
+        new_index_list = []
+
+        for item in old_data:
+            node_found = False
+            property_found = False
+            # data_found = False
+
+            for i, new_item in enumerate(new_index_list):
+                if item["node_id"] == new_item['node_id']:
+                    node_found = True
+                    for j, prop_item in enumerate(new_index_list[i]['property']):
+                        if item["property_id"] == prop_item['id']:
+                            property_found = True
+                            # print(0)
+
+                    if not property_found:
+                        datas = item['nodes_data']
+                        await asyncio.gather(*[get_content(data) for data in datas])
+                        for data in datas:
+                            data['created'] = str(
+                                item['created']).split('.')[0]
+                        new_property = {
+                            "data": datas,
+                            # "data": [
+                            #     {
+                            #         "content": item["page_content"],
+                            #         "created": item["created"],
+                            #         "name": item["filename"],
+                            #         "url": item["path"]
+                            #     }
+                            # ],
+                            "data_type": "document",
+                            "id": item["property_id"],
+                            "name": item["property_name"]
+                        }
+
+                        new_index_list[i]['property'].append(new_property)
+
+            if not node_found:
+                new_index = {}  # Create a new dictionary for each iteration
+                new_index["color"] = item["color"]
+                new_index["default_image"] = item["default_image"]
+                new_index["node_id"] = item["node_id"]
+                new_index["node_name"] = item["node_name"]
+                new_index["project_id"] = item["project_id"]
+                new_index["type_id"] = item["type_id"]
+                new_index["type_name"] = item["type_name"]
+                new_index["user_id"] = item['user_id']
+                datas = item['nodes_data']
+                await asyncio.gather(*[get_content(data) for data in datas])
+                for data in datas:
+                    data['created'] = str(item['created']).split('.')[0]
+                new_index["property"] = [
+                    {
+                        "data": datas,
+                        # "data": [
+                        #     {
+                        #         "content": item["page_content"],
+                        #         "created": item["created"],
+                        #         "name": item["filename"],
+                        #         "url": item["path"]
+                        #     }
+                        # ],
+                        "data_type": "document",
+                        "id": item["property_id"],
+                        "name": item["property_name"]
+                    }
+                ]
+
+                new_index_list.append(new_index)
+
+        tasks = []
+
+        for item in new_index_list:
+            node_id = item["node_id"]
+            index_name = ES_INDEX
+            body = item
+
+            # Create a task for each index call
+            task = index_item(index_name, node_id, body)
+            tasks.append(task)
+
+        await asyncio.gather(*tasks)
+
+        items = []
+
+        for i in range(len(new_index_list)):
+            for j in range(len(new_index_list[i]['property'])):
+                for k in range(len(new_index_list[i]['property'][j]['data'])):
+                    items.append((new_index_list[i]['property'][j]['data'][k]['url'],
+                                 new_index_list[i]['property'][j]['data'][k]['content']))
+
+        thread = threading.Thread(target=update_keywords, kwargs={
+            'items': [item for item in [item_ for item_ in items if item_[1]]]})
+
+        thread.start()
+
+        return jsonify({"status": 200})
+
     except Exception as e:
         abort(422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
         
