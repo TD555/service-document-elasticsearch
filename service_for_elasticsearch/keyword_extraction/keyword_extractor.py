@@ -48,11 +48,16 @@ def decontracted(phrase):
     phrase = re.sub(r"[\'\’]m", " am", phrase)
     return phrase
 
+def is_not_month(value):
+    months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"]
+    return value not in months
+
+
 def is_noun(token, lang='en'):
     if lang == 'en':
-        return token.tag_.startswith('NN') and token.pos_ not in ['PRON', 'ADJ']
+        return token.tag_.startswith('NN') and token.pos_ not in ['PRON', 'ADJ'] and is_not_month(token.text.strip())
     elif lang == 'ru':
-        return 'NOUN' in token.tag_
+        return 'NOUN' in token.tag_ 
 
 
 def extract(doc_text):
@@ -76,11 +81,11 @@ def extract(doc_text):
             match = re.search(keywords_pattern_en, doc_text)
             if match and match.group(1) is not None:
                 if ',' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 1.0 } for key in match.group(1).split(',')[:]]
+                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(',')[:]]
                 elif ';' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 1.0 } for key in match.group(1).split(';')[:]]
+                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(';')[:]]
                 elif '·' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 1.0 } for key in match.group(1).split('·')[:]]
+                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split('·')[:]]
                 else: 
                     all_keys = []
             else: 
@@ -111,17 +116,17 @@ def extract(doc_text):
                     continue
 
         else:
-            if doc[i].dep_ in ["amod", "compound"]:
+            if doc[i].dep_ in ["amod", "compound"] and is_not_month(doc[i].text.strip()):
                 comp_text = re.sub(sub_pattern, r'\1',
                                 doc[i].text.strip())
                 
-                while i+1 < len(doc) and doc[i+1].dep_ == "compound":
+                while i+1 < len(doc) and doc[i+1].dep_ == "compound" and is_not_month(doc[i+1].text.strip()):
                     i += 1
                     # print(doc[i].text, doc[i].dep_)
                     comp_text += ' ' + \
                         re.sub(sub_pattern, r'\1',
                             doc[i].text.strip())
-                if i+1 < len(doc) and doc[i].dep_ == 'compound' and doc[i+1].dep_ not in ['ROOT', 'appos', 'nmod']:
+                if i+1 < len(doc) and doc[i].dep_ == 'compound' and doc[i+1].dep_ not in ['ROOT', 'appos', 'nmod'] and is_not_month(doc[i+1].text.strip()):
                     # print(doc[i+1].text, doc[i+1].dep_)
                     comp_text += ' ' + \
                         re.sub(sub_pattern, r'\1',
@@ -182,7 +187,7 @@ def extract(doc_text):
     else:
         j = 0
     
-    all_keys.extend([{'name' : item[0], 'score' : scaled_keys[:i][idx_i][0]} for idx_i, item in enumerate(sorted_keys[:i]) if item[0].lower() not in [key['name'].lower() for key in all_keys]] + 
-                     [{'name' : item[0], 'score' : scaled_compounds[:j][idx_j][0]} for idx_j, item in enumerate(sorted_compounds[:j]) if item[0].lower() not in [key['name'].lower() for key in all_keys]])
+    all_keys.extend([{'name' : item[0], 'score' : scaled_keys[:i][idx_i][0] * 18 - 8} for idx_i, item in enumerate(sorted_keys[:i]) if item[0].lower() not in [key['name'].lower() for key in all_keys]] + 
+                     [{'name' : item[0], 'score' : scaled_compounds[:j][idx_j][0] * 18 - 8} for idx_j, item in enumerate(sorted_compounds[:j]) if item[0].lower() not in [key['name'].lower() for key in all_keys]])
 
     return all_keys[:20]

@@ -32,28 +32,28 @@ from keyword_extraction import keyword_extractor
 app = Flask(__name__)
 
 
-OLD_ES_INDEX = "araks_index_pre"
-ES_INDEX = "araks_index_v2"
-AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-ES_HOST = "http://localhost:9201/"
+# OLD_ES_INDEX = "araks_index_pre"
+# ES_INDEX = "araks_index_v2"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
 
-DATABASE_HOST = 'localhost'
-DATABASE_HOST = 'host.docker.internal'
-DATABASE_NAME = 'araks_db'
-DATABASE_USER = 'postgres'
-DATABASE_PASSWORD = 'Tik.555'
-DATABASE_PORT = 5433
+# DATABASE_HOST = 'localhost'
+# # DATABASE_HOST = 'host.docker.internal'
+# DATABASE_NAME = 'araks_db'
+# DATABASE_USER = 'postgres'
+# DATABASE_PASSWORD = 'Tik.555'
+# DATABASE_PORT = 5433
 
-# OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
-# ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
-# AMAZON_URL = os.environ['AMAZON_URL']
-# ES_HOST = os.environ['ELASTICSEARCH_URL']
+OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
+AMAZON_URL = os.environ['AMAZON_URL']
+ES_HOST = os.environ['ELASTICSEARCH_URL']
 
-# DATABASE_NAME = os.environ['DB_NAME']
-# DATABASE_USER = os.environ['DB_USER']
-# DATABASE_HOST = os.environ['DB_HOST']
-# DATABASE_PASSWORD = os.environ['DB_PASSWORD']
-# DATABASE_PORT = os.environ['DB_PORT']
+DATABASE_NAME = os.environ['DB_NAME']
+DATABASE_USER = os.environ['DB_USER']
+DATABASE_HOST = os.environ['DB_HOST']
+DATABASE_PASSWORD = os.environ['DB_PASSWORD']
+DATABASE_PORT = os.environ['DB_PORT']
 
 es = Elasticsearch([ES_HOST])
 
@@ -90,7 +90,10 @@ put_data = {
                                         'name': {"type": "keyword"},
                                         'score': {'type': 'half_float'}
                                     }
-                                }
+                                },
+                                "url": {
+                                    "type": "keyword"
+                                },
                             }
                         }
                     }
@@ -521,6 +524,8 @@ def update_keywords(items):
 
     for url, text in items:
 
+        es.indices.refresh(index=ES_INDEX)
+        
         if text.strip():
             es.update_by_query(
                 index=ES_INDEX,
@@ -1241,7 +1246,8 @@ def search():
 
                 for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
                     data_dict = {}
-                    data_dict["path"] = AMAZON_URL + data_hit['_source']['url']
+                    data_dict["path"] = check_base_url_exists(
+                        data_hit['_source']['url'])
                     data_dict["match_count"] = 0
 
                     if 'highlight' in data_hit:
@@ -1547,56 +1553,53 @@ async def get__old_list(**search):
 
 
 async def get_tags(url, project_id=None, node_id=None, property_id=None):
-
-    return es.search(
-        index=ES_INDEX,
-        body={
-            "query": {
-                "bool": {
-                    "must": [
-                        # {
-                        #     "term": {"project_id.keyword": project_id}
-                        # },
-                        # {
-                        #     "term": {"node_id.keyword": node_id}
-                        # },
-                        # {
-                        #     "nested": {
-                        #         "path": "property",
-                        #         "query": {
-                        #                 "bool": {
-                        #                     "must": [
-                        #                         {"term": {
-                        #                             "property.id.keyword": property_id}}
-                        #                     ]
-                        #                 }
-                        #         }
-                        #     }
-                        # },
-                        {
-                            "nested": {
-                                "path": "property.data",
-                                "query": {
-                                        "bool": {
-                                            "must": [
-                                                {"term": {
-                                                    "property.data.url.keyword": url}}
-                                            ]
-                                        }
+    query_body = {
+        "query": {
+            "nested": {
+                "path": "property.data",
+                "query": {
+                    "bool": {
+                        "must": [
+                            {
+                                "term": {
+                                    "property.data.url": url
                                 }
                             }
-                        }
-                    ]
-                }
-            },
-            "_source": ["property.data.keywords"]
+                        ]
+                    }
+                },
+                "inner_hits": {"_source": ["property.data.keywords"]}
+            }
         }
+    }
 
-    )
+    # Optional filters (uncomment if needed)
+    if project_id:
+        query_body["query"]["bool"]["must"].append(
+            {"term": {"project_id.keyword": project_id}})
+    if node_id:
+        query_body["query"]["bool"]["must"].append(
+            {"term": {"node_id.keyword": node_id}})
+    if property_id:
+        query_body["query"]["bool"]["must"].append({
+            "nested": {
+                "path": "property",
+                "query": {
+                    "bool": {
+                        "must": [
+                            {"term": {"property.id.keyword": property_id}}
+                        ]
+                    }
+                }
+            }
+        })
+
+    response = es.search(index=ES_INDEX, body=query_body)
+
+    return response
 
 
 async def get_related_docs(keyword, url):
-
     return es.search(
         index=ES_INDEX,
         body={
@@ -1645,7 +1648,7 @@ async def get_related_docs(keyword, url):
                                     "must_not": [
                                         {
                                             "term": {
-                                                "property.data.url.keyword": url
+                                                "property.data.url": url
                                             }
                                         }
                                     ]
@@ -1670,17 +1673,16 @@ async def generate_tags():
     except:
         abort(422, "Invalid raw data")
 
-    result = (await get_tags(url))['hits']['hits']
+    result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
     all_dict = defaultdict(list)
     if result:
-        keywords = result[0]['_source']['property'][0]['data'][0]
+        keywords = result[0]['_source']
         for i, keyword in enumerate(keywords['keywords']):
             result = (await get_related_docs(keyword['name'], url))['hits']['hits']
             for node in result:
                 for property in node['inner_hits']["property"]['hits']['hits']:
                     all_dict[keyword['name']] = [property_data["_source"]['url']
                                                  for property_data in property['inner_hits']["property.data"]['hits']['hits']]
-
             keywords['keywords'][i]['count'] = len(all_dict[keyword['name']])
 
         all_urls = []
@@ -1768,89 +1770,135 @@ def convert_date(pubDate):
     year = pubDate["Year"]
     return f"{year}-{month}-{day}"
 
+
 def convert_to_text(item):
     return item.get("#text", "") if isinstance(item, dict) else item
 
-async def fetch_with_retry(session, id, retry_attempts=10):
+
+async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
         try:
-            async with session.get(FETCH_URL.format(id=id.strip())) as response:
+            async with session.get(FETCH_URL.format(id=id.strip()), timeout=timeout) as response:
                 response.raise_for_status()
                 xml_file = await response.text()
                 xml_data = ET.fromstring(xml_file)
                 xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
-                dict_data = dict(xmltodict.parse(xmlstr))['PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+                dict_data = dict(xmltodict.parse(xmlstr))[
+                    'PubmedArticleSet']['PubmedArticle']['MedlineCitation']
 
+                title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
-                    'id': id,
-                    'articleURL': '',
-                    'title': convert_to_text(dict_data['Article']['ArticleTitle']),
-                    'abstract': convert_to_text(dict_data['Article']['Abstract']["AbstractText"]),
-                    'pubDate': convert_date(dict_data['Article']['Journal']['JournalIssue']['PubDate']),
-                    'language': dict_data['Article'].get('Language', ''),
+                    'article': {
+                        'article_id': id,
+                        'name': title[:50],
+                        'article_url': '',
+                        'source': 'PubMed',
+                        'title': title,
+                        'abstract': convert_to_text(dict_data['Article'].get('Abstract', {'AbstractText': ''})["AbstractText"], True),
+                        'pub_date': convert_date(dict_data['Article']['Journal']['JournalIssue']['PubDate']),
+                        'language': dict_data['Article'].get('Language', '')
+                    },
                     'country': dict_data['MedlineJournalInfo'].get('Country', ''),
                 }
 
                 elocation = dict_data['Article'].get('ELocationID')
                 if isinstance(elocation, dict) and elocation.get('@EIdType') == 'doi':
-                    id_data['articleURL'] = 'https://www.doi.org/' + elocation.get('#text', '')
+                    id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                        elocation.get('#text', '')
                 elif isinstance(elocation, list):
                     for eid in elocation:
                         if eid.get('@EIdType') == 'doi':
-                            id_data['articleURL'] = 'https://www.doi.org/' + eid.get('#text', '')
+                            id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                                eid.get('#text', '')
 
-                authors = dict_data['Article']['AuthorList']['Author']
+                authors = dict_data['Article'].get(
+                    'AuthorList', {'Author': []})['Author']
+                if isinstance(authors, list):
+                    authors = authors[:20]
+                else:
+                    authors = [authors]
                 id_data['authors'] = [
                     {
                         "affiliation": author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"],
-                        'name': author['ForeName'] + ', ' + author['LastName'],
-                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
+                        'name': (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()[:50],
+                        'author_id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"]).strip())
                     }
                     if isinstance(author.get('AffiliationInfo'), dict)
                     else
                     {
-                        "affiliation": ', '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
-                        'name': author['ForeName'] + ', ' + author['LastName'],
-                        'id': uuid.uuid5(namespace, (author['ForeName'] + ', ' + author['LastName'] + ' ' + ', '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
+                        "affiliation": ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])]),
+                        'name': (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()[:50],
+                        'author_id': uuid.uuid5(namespace, (author.get('ForeName', '') + ' ' + author.get('LastName', '') + ' ' + ' '.join([item["Affiliation"] for item in author.get('AffiliationInfo', [{"Affiliation": ""}])])).strip())
                     }
-                    for author in authors
+                    for author in authors if (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()
                 ]
 
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
-                id_data['keywords'] = [keyword.get("#text", "") for keyword in keywords] if keywords else []
+                if not isinstance(keywords, list):
+                    keywords = [keywords]
+                id_data['keywords'] = [keyword.get(
+                    "#text", "") for keyword in keywords] if keywords else []
 
                 return id_data
-            
-        except aiohttp.ClientError as ce:
+
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ce:
+            print(f"Client error for ID {id}: {ce}")
             if attempt < retry_attempts - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
             else:
                 abort(500, f"Failed to fetch details for ID {id}: {ce}")
         except Exception as e:
+            print(f"Error processing ID {id}: {e}")
+            break
             abort(500, f"Error processing ID {id}: {e}")
-        
+
+
+async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, timeout=10):
+    for attempt in range(retry_attempts):
+        try:
+            async with session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=offset), timeout=timeout) as response:
+                response.raise_for_status()
+                return await response.json()
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ce:
+            print(f"Client error for keyword {keyword}: {ce}")
+            if attempt < retry_attempts - 1:
+                await asyncio.sleep(2 ** attempt)
+                continue
+            else:
+                abort(500, f"Failed to search for keyword {keyword}: {ce}")
+        except Exception as e:
+            print(f"Error processing keyword {keyword}: {e}")
+            abort(500, f"Error processing keyword {keyword}: {e}")
+
 
 @app.route('/pubmed/get_data', methods=["POST"])
 async def pubmed_preview():
     try:
-        keyword = request.json['keyword']
-        limit = request.json['limit']
-        page = request.json['page']
-    except:
-        abort(422, "Invalid raw data")
+        keyword = str(request.json['keyword'])
+        limit = request.json.get('limit', 5)
+        page = int(request.json.get('page', 1))
+    except Exception as e:
+        abort(
+            422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
 
-    async with aiohttp.ClientSession() as session:
-        response = await session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=(page-1)*limit))
-        id_list = (await response.json())['esearchresult']['idlist']
-        await asyncio.sleep(0.1)
-        tasks = [fetch_with_retry(session, id) for id in id_list]
-        all_data = await asyncio.gather(*tasks)
+    if len(keyword) < 3:
+        abort(400, "Keyword must be at least 3 characters long")
 
-    all_data = [data for data in all_data if data]
+    try:
+        async with aiohttp.ClientSession() as session:
+            search_result = await asyncio.wait_for(search_with_retry(session, keyword, limit, (page-1)*limit), timeout=10)
+            id_list = search_result['esearchresult']['idlist']
+            await asyncio.sleep(0.1)
 
-    return all_data
+            tasks = [fetch_with_retry(session, id) for id in id_list]
+            all_data = await asyncio.gather(*[asyncio.wait_for(task, timeout=20) for task in tasks])
 
+        all_data = [data for data in all_data if data]
+
+        return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
+    except asyncio.TimeoutError:
+        abort(500, "The request timed out. Please try again later.")
 
 
 get_all_query = """SELECT np.user_id, np.project_id, n.project_type_id as type_id, pnt.name as type_name, pnt.color as color, np.node_id, n.name as node_name, n.default_image, np.project_type_property_id as property_id, pntp.name as property_name, 'doc' AS type, np.nodes_data, np.created_at as created
