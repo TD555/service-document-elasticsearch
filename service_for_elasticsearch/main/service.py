@@ -29,6 +29,9 @@ from version import __version__, __description__
 
 app = Flask(__name__)
 
+# ES_INDEX = "araks_index"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
 
 ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
 AMAZON_URL = os.environ['AMAZON_URL']
@@ -1298,8 +1301,8 @@ async def get_scheme():
 
 namespace = uuid.NAMESPACE_DNS
 
-SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}'
-FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml"
+SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509'
+FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509"
 
 
 def convert_date(pubDate):
@@ -1323,16 +1326,15 @@ def convert_to_text(item, abstract=False):
     return item
 
 
-async def fetch_with_retry(session, id, retry_attempts=10):
+async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
         try:
-            async with session.get(FETCH_URL.format(id=id.strip())) as response:
+            async with session.get(FETCH_URL.format(id=id.strip()), timeout=timeout) as response:
                 response.raise_for_status()
                 xml_file = await response.text()
                 xml_data = ET.fromstring(xml_file)
                 xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
-                dict_data = dict(xmltodict.parse(xmlstr))[
-                    'PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+                dict_data = dict(xmltodict.parse(xmlstr))['PubmedArticleSet']['PubmedArticle']['MedlineCitation']
                 
                 title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
@@ -1342,26 +1344,26 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                         'article_url': '',
                         'source': 'PubMed',
                         'title': title,
-                        'abstract': convert_to_text(dict_data['Article'].get('Abstract',{'AbstractText' : ''})["AbstractText"], True),
+                        'abstract': convert_to_text(dict_data['Article'].get('Abstract', {'AbstractText': ''})["AbstractText"], True),
                         'pub_date': convert_date(dict_data['Article']['Journal']['JournalIssue']['PubDate']),
-                        'language': dict_data['Article'].get('Language', '')},
+                        'language': dict_data['Article'].get('Language', '')
+                    },
                     'country': dict_data['MedlineJournalInfo'].get('Country', ''),
                 }
 
                 elocation = dict_data['Article'].get('ELocationID')
                 if isinstance(elocation, dict) and elocation.get('@EIdType') == 'doi':
-                    id_data['article']['article_url'] = 'https://www.doi.org/' + \
-                        elocation.get('#text', '')
+                    id_data['article']['article_url'] = 'https://www.doi.org/' + elocation.get('#text', '')
                 elif isinstance(elocation, list):
                     for eid in elocation:
                         if eid.get('@EIdType') == 'doi':
-                            id_data['article']['article_url'] = 'https://www.doi.org/' + \
-                                eid.get('#text', '')
-                                
-                authors = dict_data['Article'].get('AuthorList', {'Author' : []})['Author']
+                            id_data['article']['article_url'] = 'https://www.doi.org/' + eid.get('#text', '')
+
+                authors = dict_data['Article'].get('AuthorList', {'Author': []})['Author']
                 if isinstance(authors, list):
                     authors = authors[:20]
-                else: authors = [authors]
+                else:
+                    authors = [authors]
                 id_data['authors'] = [
                     {
                         "affiliation": author.get('AffiliationInfo', {"Affiliation": ""})["Affiliation"],
@@ -1381,12 +1383,12 @@ async def fetch_with_retry(session, id, retry_attempts=10):
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
                 if not isinstance(keywords, list):
                     keywords = [keywords]
-                id_data['keywords'] = [keyword.get(
-                    "#text", "") for keyword in keywords] if keywords else []
+                id_data['keywords'] = [keyword.get("#text", "") for keyword in keywords] if keywords else []
 
                 return id_data
 
-        except aiohttp.ClientError as ce:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ce:
+            print(f"Client error for ID {id}: {ce}")
             if attempt < retry_attempts - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
@@ -1397,14 +1399,14 @@ async def fetch_with_retry(session, id, retry_attempts=10):
             break
             abort(500, f"Error processing ID {id}: {e}")
 
-
-async def search_with_retry(session, keyword, limit, offset, retry_attempts=10):
+async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
         try:
-            async with session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=offset)) as response:
+            async with session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=offset), timeout=timeout) as response:
                 response.raise_for_status()
                 return await response.json()
-        except aiohttp.ClientError as ce:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as ce:
+            print(f"Client error for keyword {keyword}: {ce}")
             if attempt < retry_attempts - 1:
                 await asyncio.sleep(2 ** attempt)
                 continue
@@ -1425,14 +1427,18 @@ async def pubmed_preview():
         
     if len(keyword) < 3:
         abort(400, "Keyword must be at least 3 characters long")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            search_result = await asyncio.wait_for(search_with_retry(session, keyword, limit, (page-1)*limit), timeout=30)
+            id_list = search_result['esearchresult']['idlist']
+            await asyncio.sleep(0.1)
             
-    async with aiohttp.ClientSession() as session:
-        search_result = await search_with_retry(session, keyword, limit, (page-1)*limit)
-        id_list = search_result['esearchresult']['idlist']
-        await asyncio.sleep(0.1)
-        tasks = [fetch_with_retry(session, id) for id in id_list]
-        all_data = await asyncio.gather(*tasks)
+            tasks = [fetch_with_retry(session, id) for id in id_list]
+            all_data = await asyncio.gather(*[asyncio.wait_for(task, timeout=20) for task in tasks])
 
-    all_data = [data for data in all_data if data]
+        all_data = [data for data in all_data if data]
 
-    return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
+        return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
+    except asyncio.TimeoutError:
+        abort(500, "The request timed out. Please try again later.")
