@@ -21,7 +21,6 @@ services:
       - cluster.routing.allocation.disk.watermark.low = 85%
       - cluster.routing.allocation.disk.watermark.high = 90%
       - discovery.seed_hosts=[]
-      # - cluster.initial_master_nodes=elasticsearch1
       - path.data=/usr/share/elasticsearch/data
     ulimits:
       memlock:

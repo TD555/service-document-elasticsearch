@@ -1,10 +1,10 @@
+from flask import Flask, jsonify, request, json, abort, make_response
+from elasticsearch import Elasticsearch, ConnectionError, BadRequestError, exceptions
+from elasticsearch.helpers import bulk
+from elasticsearch.exceptions import ConflictError
 import xml.etree.ElementTree as ET
 import xmltodict
 import uuid
-from psycopg2.extras import RealDictCursor
-import psycopg2 as ps
-from flask import Flask, jsonify, request, abort
-from elasticsearch import Elasticsearch, ConnectionError, BadRequestError
 import asyncio
 import aiohttp
 from datetime import datetime
@@ -12,13 +12,13 @@ import requests
 from collections import defaultdict
 from random import random
 import tempfile
+import uuid
 import traceback
 import time
 import pytz
 import openpyxl
 import xlrd
 import subprocess
-import threading
 
 import fitz
 import os
@@ -27,10 +27,11 @@ import io
 
 from version import __version__, __description__
 
-from keyword_extraction import keyword_extractor
-
 app = Flask(__name__)
 
+# ES_INDEX = "araks_index"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
 
 # OLD_ES_INDEX = "araks_index_pre"
 # ES_INDEX = "araks_index_v2"
@@ -107,6 +108,7 @@ try:
     es.indices.create(index=ES_INDEX, body=put_data)
 
 except BadRequestError as e:
+    # print(str(e))
     pass
 
 
@@ -116,6 +118,7 @@ try:
     es.indices.put_settings(index=ES_INDEX, settings=settings)
     OFFSET = 10000000
 except BadRequestError as e:
+    # print(str(e))
     OFFSET = 1000000
     pass
 
@@ -126,36 +129,22 @@ async def get_filestorage_object(url):
         file_object = io.BytesIO(response.content)
         return file_object
     else:
+        # Handle error cases
         return None
-    # try:
-    #     with open(url, 'rb') as file:
-    #         file_content = file.read()
-    #         file_object = io.BytesIO(file_content)
-    #         return file_object
-    # except FileNotFoundError:
-    #     print("File not found.")
-    #     return None
 
 
-# def remove_duplicates(input_list):
-#     seen = set()
-#     unique_list = []
+def remove_duplicates(input_list):
+    seen = set()
+    unique_list = []
 
-#     for item in input_list:
-#         frozen_item = frozenset(item.items())
+    for item in input_list:
+        frozen_item = frozenset(item.items())
 
-#         if frozen_item not in seen:
-#             seen.add(frozen_item)
-#             unique_list.append(item)
+        if frozen_item not in seen:
+            seen.add(frozen_item)
+            unique_list.append(item)
 
-#     return unique_list
-
-
-def check_base_url_exists(path):
-    if not path.startswith(AMAZON_URL):
-        return AMAZON_URL + path
-    else:
-        return path
+    return unique_list
 
 
 async def extract_text_from_pdf(pdf_file):
@@ -170,10 +159,10 @@ async def extract_text_from_pdf(pdf_file):
         # Extract text from the page
         text = page.get_text("text")
 
-        clean_text = text.replace("\n", " ")
-        clean_text = re.sub(r'\s+', ' ', clean_text)
+        text = text.replace("\n", " ")
+        clean_text = re.sub(r'\s+', ' ', text)
 
-        all_texts.append((text, clean_text))
+        all_texts.append(clean_text)
 
     # Close the PDF document
     pdf_document.close()
@@ -181,95 +170,114 @@ async def extract_text_from_pdf(pdf_file):
     return all_texts
 
 
+def create_doc(es, **kwargs):
+    es.index(index=ES_INDEX, id=kwargs["doc_id"] +
+             str(kwargs["page"]), document=kwargs)
+
+
 async def extract_text_from_doc(doc_file):
+    try:
+        doc_file.seek(0)
 
-    doc_file.seek(0)
+        document_content = io.BytesIO(doc_file.read())
+        temp_file = tempfile.NamedTemporaryFile(suffix=".docx")
 
-    document_content = io.BytesIO(doc_file.read())
-    temp_file = tempfile.NamedTemporaryFile(suffix=".docx")
+        temp_file.write(document_content.getvalue())
+        document_path = temp_file.name
 
-    temp_file.write(document_content.getvalue())
-    document_path = temp_file.name
+        pdf_bytes = subprocess.check_output(
+            ["unoconv", "-f", "pdf", "--stdout", document_path]
+        )
 
-    pdf_bytes = subprocess.check_output(
-        ["unoconv", "-f", "pdf", "--stdout", document_path]
-    )
+        # Create a BytesIO object from the PDF content
+        pdf_stream = io.BytesIO(pdf_bytes)
 
-    # Create a BytesIO object from the PDF content
-    pdf_stream = io.BytesIO(pdf_bytes)
+        all_texts = await extract_text_from_pdf(pdf_stream)
+        temp_file.close()
 
-    all_texts = await extract_text_from_pdf(pdf_stream)
-    temp_file.close()
+        return all_texts
 
-    return all_texts
+    except Exception as e:
+        return {"message": e.stderr}
 
 
 async def extract_text_from_ppt(ppt_file):
+    try:
+        ppt_file.seek(0)
 
-    ppt_file.seek(0)
+        ppt_content = io.BytesIO(ppt_file.read())
+        temp_file = tempfile.NamedTemporaryFile(suffix=".pptx")
+        temp_file.write(ppt_content.getvalue())
+        ppt_path = temp_file.name
 
-    ppt_content = io.BytesIO(ppt_file.read())
-    temp_file = tempfile.NamedTemporaryFile(suffix=".pptx")
-    temp_file.write(ppt_content.getvalue())
-    ppt_path = temp_file.name
+        pdf_bytes = subprocess.check_output(
+            ["unoconv", "-f", "pdf", "--stdout", ppt_path]
+        )
+        pdf_stream = io.BytesIO(pdf_bytes)
 
-    pdf_bytes = subprocess.check_output(
-        ["unoconv", "-f", "pdf", "--stdout", ppt_path]
-    )
-    pdf_stream = io.BytesIO(pdf_bytes)
+        all_texts = await extract_text_from_pdf(pdf_stream)
 
-    all_texts = await extract_text_from_pdf(pdf_stream)
+        temp_file.close()
 
-    temp_file.close()
+        return all_texts
 
-    return all_texts
+    except Exception as e:
+        return {"message": e.stderr}
 
 
 async def extract_text_from_xlsx(xlsx_file):
+    try:
+        temp_buffer = io.BytesIO(xlsx_file.read())
 
-    temp_buffer = io.BytesIO(xlsx_file.read())
+        workbook = openpyxl.load_workbook(temp_buffer)
 
-    workbook = openpyxl.load_workbook(temp_buffer)
+        all_texts = []
 
-    all_texts = []
+        for sheet_name in workbook.sheetnames:
+            sheet = workbook[sheet_name]
 
-    for sheet_name in workbook.sheetnames:
-        sheet = workbook[sheet_name]
+            row_str = []
+            # Loop through each row in the sheet
+            for row in sheet.iter_rows(values_only=True):
+                # print(row)
+                row_str.append(" ".join(map(str, row)))
 
-        row_str = []
-        # Loop through each row in the sheet
-        for row in sheet.iter_rows(values_only=True):
-            row_str.append(" ".join(map(str, row)))
+                # Print the formatted row
+            all_texts.append(sheet_name + " " + " ".join(row_str).strip())
 
-        all_texts.append(sheet_name + " " + " ".join(row_str).strip())
+        workbook.close()
+        temp_buffer.close()
 
-    workbook.close()
-    temp_buffer.close()
+        return all_texts
 
-    return all_texts
+    except Exception as e:
+        return {"message": e.stderr}
 
 
 async def extract_text_from_xls(xls_file):
+    try:
+        temp_buffer = io.BytesIO(xls_file.read())
 
-    temp_buffer = io.BytesIO(xls_file.read())
+        xls_workbook = xlrd.open_workbook(file_contents=temp_buffer.read())
 
-    xls_workbook = xlrd.open_workbook(file_contents=temp_buffer.read())
+        all_texts = []
 
-    all_texts = []
+        for sheet_name in xls_workbook.sheet_names():
+            sheet = xls_workbook.sheet_by_name(sheet_name)
 
-    for sheet_name in xls_workbook.sheet_names():
-        sheet = xls_workbook.sheet_by_name(sheet_name)
+            rows = []
 
-        rows = []
+            # Loop through each row in the sheet
+            for row_num in range(sheet.nrows):
+                row = sheet.row_values(row_num)
+                rows.append(" ".join(map(str, row)))
 
-        # Loop through each row in the sheet
-        for row_num in range(sheet.nrows):
-            row = sheet.row_values(row_num)
-            rows.append(" ".join(map(str, row)))
-
-        all_texts.append(sheet_name + " " + " ".join(rows).strip())
+            all_texts.append(sheet_name + " " + " ".join(rows).strip())
 
         return all_texts
+
+    except Exception as e:
+        return {"message": e.stderr}
 
 
 @app.errorhandler(Exception)
@@ -299,158 +307,87 @@ def info():
     return __description__
 
 
-async def check_nested_field(path, nested_field, value):
-
-    query = {
-        "query": {
-            "nested": {
-                "path": path,
-                "query": {
-                    "bool": {
-                        "must": [
-                            {"exists": {"field": f"{path}.{nested_field}"}},
-                            {"term": {f"{path}.{nested_field}.keyword": value}}
-                        ]
-                    }
-                }
-            }
-        }
-    }
-
-    result = es.search(index=ES_INDEX, body=query)
-    return result
-
-
-async def update_docs(newData, oldData, node_id, property_id, property_name, data_type):
-    update_query = {
-        "script": {
-            "source": """
-                boolean propertyExists = false;
-                for (int i = 0; i < ctx._source.property.size(); i++) {
-                    if (ctx._source.property[i].id == params.propertyId) {
-                        // Check if params.oldData is not empty before removing
-                        if (!params.oldData.isEmpty()) {
-                            for (int j = 0; j < params.oldData.size(); j++) {
-                                ctx._source.property[i].data.removeIf(item -> item.url == params.oldData[j].url && item.name == params.oldData[j].name);
-                            }
-                        }
-                        // Check if params.newData is not empty before adding
-                        if (!params.newData.isEmpty()) {
-                            for (int k = 0; k < params.newData.size(); k++) {
-                                ctx._source.property[i].data.add(params.newData[k]);
-                            }
-                        }
-                        if (ctx._source.property[i].data.isEmpty()) {
-                            ctx._source.property.remove(i);
-                        }
-                        propertyExists = true;
-                    }
-                }
-                
-                // If property does not exist, create it
-                if (!propertyExists) {
-                    def newProperty = [
-                        "id": params.propertyId,
-                        "data": params.newData,
-                        "name": params.propertyName,
-                        "data_type": params.propertyType
-                    ];
-                    if (!ctx._source.containsKey('property')) {
-                        ctx._source.property = [newProperty];
-                    } else {
-                        ctx._source.property.add(newProperty);
-                    }
-                }
-            """,
-            "params": {
-                "propertyId": property_id,
-                "propertyName": property_name,
-                "propertyType": data_type,
-                "newData": newData,
-                "oldData": oldData  # Assuming newData is a list of dictionaries
-            }
-        },
-        "query": {
-            "bool": {
-                "must": [
-                    {
-                        "term": {
-                            "node_id.keyword": {
-                                "value": node_id
-                            }
-                        }
-                    }
-                ]
-            }
-        }
-    }
-
-    es.update_by_query(index=ES_INDEX, body=update_query)
-
-
-async def delete_docs(non_nested_fields):
-    delete_query = {
-        "query": {
-            "bool": {
-                "must": [
-                ]
-            }
-        }
-    }
-    for field, value in non_nested_fields.items():
-        if value:
-            delete_query['query']['bool']['must'].append(
-                {"term": {field + ".keyword": value}})
-
-    return dict(es.delete_by_query(index=ES_INDEX, body=delete_query))
-
-
-async def delete_empty_docs():
-    delete_query = {
-        "query": {
-            "bool": {
-                "must_not": {
-                    "nested": {
-                        "path": "property",
-                        "query": {
-                            "exists": {
-                                "field": "property.id"
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    es.delete_by_query(index=ES_INDEX, body=delete_query)
-
-
-async def index_item(index, id, body):
-    es.index(index=index, id=id, body=body)
-
-
 @app.route("/create_or_update", methods=["POST"])
 async def create_or_update():
-
-    messages = []
+    #   ---Get file and parse content---
+    data_dict = {}
 
     try:
         nodes_data = request.json["nodes_data"]
-        project_id = request.json["project_id"]
-        user_id = request.json["user_id"]
-        node_id = request.json["node_id"]
-        node_name = request.json["node_name"]
-        type_id = request.json["type_id"]
-        property_id = request.json["property_id"]
-        data_type = request.json["data_type"]
-        type_name = request.json["type_name"]
-        property_name = request.json["property_name"]
-        color = request.json["color"]
-        default_image = request.json["default_image"]
+        data_dict["project_id"] = request.json["project_id"]
+        data_dict["user_id"] = request.json["user_id"]
+        data_dict["node_id"] = request.json["node_id"]
+        data_dict["node_name"] = request.json["node_name"]
+        data_dict["type_id"] = request.json["type_id"]
+        data_dict["property_id"] = request.json["property_id"]
+        data_dict["type_name"] = request.json["type"]
+        data_dict["property_name"] = request.json["property"]
+        data_dict["color"] = request.json["color"]
+        data_dict["default_image"] = request.json["default_image"]
+
+        # if (not data_dict['default_image'].startswith(AMAZON_URL)) and (data_dict['default_image']):
+        #     data_dict['default_image'] = AMAZON_URL + data_dict['default_image']
+
+    except Exception as e:
+        abort(422, f"Invalid raw data: {str(e)}")
+
+    all_docs = await get_list(node_id=data_dict["node_id"], property_id=data_dict["property_id"])
+
+    id_dict = {"doc_ids": defaultdict(list)}
+    for item in all_docs.json["docs"]:
+        id_dict["doc_ids"][item["path"]].append(
+            item["doc_id"] + str(item["page"])
+        )
+        id_dict["source"] = {  # type: ignore
+            "node_name": item["node_name"],
+            "type_name": item["type_name"],
+            "property_name": item["property_name"],
+            "default_image": item["default_image"],
+            "color": item["color"],
+        }
+
+    print("All filenames in the start", list(id_dict["doc_ids"].keys()))
+    filenames = list(id_dict["doc_ids"].keys())
+    data_dict["filenames"] = filenames
+    data_dict["id_dict"] = id_dict
+
+    returned_jsons = []
+
+    for item in remove_duplicates(nodes_data):
+        result = {**data_dict, **item}
+        returned_jsons.append(upload_document(result))
+
+    # print(returned_jsons)
+    returned_jsons = await asyncio.gather(*returned_jsons)
+
+    print("All filenames in the end", filenames)
+
+    my_namespace = uuid.NAMESPACE_DNS
+
+    for filename in filenames:
+        my_uuid = uuid.uuid5(my_namespace, filename + data_dict["node_id"])
+        old_id = str(my_uuid)
+        delete_response = await delete(old_id, filename)
+        returned_jsons.append(delete_response)
+
+    # print((await get_list()).json['docs'])
+    return jsonify({"messages": returned_jsons, "status": 200})
+
+
+async def upload_document(data):
+    # parsed = parser.from_buffer(file.read())
+    # text = parsed["content"]
+    # content = text.strip()
+
+    try:
+        name = data["name"]
+        path = data["url"]
+
+        if not path.startswith(AMAZON_URL):
+            path = AMAZON_URL + path
 
     except:
-        abort(422, "Invalid raw data")
+        return {"message": f"Invalid key names in nodes_data"}
 
     existing_document = es.get(index=ES_INDEX, id=node_id, ignore=404)
 
@@ -577,434 +514,414 @@ async def get_content(item):
         end = time.time()
         request_time = end - start
 
+    except Exception:
+        return {"message": f"Document reading timeout", "URL": path}
+
+    project_id = data["project_id"]
+    user_id = data["user_id"]
+    node_id = data["node_id"]
+    node_name = data["node_name"]
+    type_id = data["type_id"]
+    property_id = data["property_id"]
+    type_name = data["type_name"]
+    property_name = data["property_name"]
+    color = data["color"]
+    default_image = data["default_image"]
+    filenames = data["filenames"]
+    id_dict = data["id_dict"]
+
+    my_namespace = uuid.NAMESPACE_DNS
+
+    my_uuid = uuid.uuid5(my_namespace, path + node_id)
+
+    filename = os.path.basename(path)
+
+    current_utc_time = datetime.utcnow()
+    gmt_plus_4_time = current_utc_time.replace(
+        tzinfo=pytz.utc).astimezone(gmt_plus_4)
+
+    gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
+
+    if path in filenames:
+        filenames.remove(path)
+        update_request = {
+            "doc": {
+                "node_name": node_name,
+                "type_name": type_name,
+                "property_name": property_name,
+                "default_image": default_image,
+                "color": color,
+            }
+        }
+
+        if id_dict["source"] != update_request["doc"]:
+            # Update documents
+            update_actions = []
+
+            # Populate the list with update actions for each doc_id
+            for doc_id in id_dict["doc_ids"][path]:
+                update_actions.append(
+                    {
+                        "_op_type": "update",  # Specify the operation type
+                        "_index": ES_INDEX,
+                        "_id": doc_id,
+                        "_source": update_request,  # Provide the update request for each document
+                    }
+                )
+
+            # Use the bulk API to perform updates
+            success, failed = bulk(es, update_actions)
+
+            # Check for any failed updates
+            if failed:
+                for item in failed:
+                    print(f"Failed to update document with ID {item['_id']}")
+
+            else:
+                return {"message": f"Document is updated.", "URL": path}
+        return {"message": f"Document already exists in database.", "URL": path}
+
+    #         main_prompt = f"""Get neo4j schema with relationships from current text - '{content}' """
+    #         main_prompt.replace('Resume', '')
+
+    #         while 1:
+    #             try:
+    #                 completion = openai.ChatCompletion.create(
+    #                     model=model_engine,
+    #                     messages=[
+    #                         {"role": "user", "content": main_prompt.strip()}],
+    #                     temperature = 0.1 ** 100
+    #                 )
+
+    #                 schema = (completion["choices"][0]["message"]["content"]).replace("Neo4j schema:", "").strip()
+
+    #                 print(schema)
+
+    #                 nodes = preprocess.Preprocess(schema).nodes
+    #                 edges = preprocess.Preprocess(schema).edges
+
+    #                 # return json.dumps({'file_name' : filename, 'nodes' : nodes, 'edges' : edges})
+
+    try:
         if not file:
-            content = []
+            create_doc(
+                es,
+                doc_id=str(my_uuid),
+                path=path,
+                project_id=project_id,
+                user_id=user_id,
+                node_id=node_id,
+                type_id=type_id,
+                property_id=property_id,
+                node_name=node_name,
+                type_name=type_name,
+                property_name=property_name,
+                color=color,
+                default_image=default_image,
+                filename=name,
+                page=0,
+                page_content="",
+                created=str(gmt_plus_4_time_str),
+            )
+            raise Exception
+
+        if filename.endswith(".pdf"):
+            texts = await asyncio.wait_for(
+                extract_text_from_pdf(
+                    pdf_file=file), upload_timeout - request_time
+            )
+
+        elif (
+            filename.endswith(".docx")
+            or filename.endswith(".doc")
+            or filename.endswith(".msword")
+            or filename.endswith(".document")
+        ):
+            texts = await asyncio.wait_for(
+                extract_text_from_doc(
+                    doc_file=file), upload_timeout - request_time
+            )
+
+        elif filename.endswith(".pptx") or filename.endswith(".ppt"):
+            texts = await asyncio.wait_for(
+                extract_text_from_ppt(
+                    ppt_file=file), upload_timeout - request_time
+            )
+
+        elif filename.endswith(".xlsx"):
+            texts = await asyncio.wait_for(
+                extract_text_from_xlsx(
+                    xlsx_file=file), upload_timeout - request_time
+            )
+
+        elif filename.endswith(".xls"):
+            texts = await asyncio.wait_for(
+                extract_text_from_xls(
+                    xls_file=file), upload_timeout - request_time
+            )
 
         else:
-            try:
-                if filename.endswith(".pdf"):
-                    content = await asyncio.wait_for(
-                        extract_text_from_pdf(
-                            pdf_file=file), upload_timeout - request_time
-                    )
+            create_doc(
+                es,
+                doc_id=str(my_uuid),
+                path=path,
+                project_id=project_id,
+                user_id=user_id,
+                node_id=node_id,
+                type_id=type_id,
+                property_id=property_id,
+                node_name=node_name,
+                type_name=type_name,
+                property_name=property_name,
+                color=color,
+                default_image=default_image,
+                filename=name,
+                page=0,
+                page_content="",
+                created=str(gmt_plus_4_time_str),
+            )
 
-                elif (
-                    filename.endswith(".docx")
-                    or filename.endswith(".doc")
-                    or filename.endswith(".msword")
-                    or filename.endswith(".document")
-                ):
-                    content = await asyncio.wait_for(
-                        extract_text_from_doc(
-                            doc_file=file), upload_timeout - request_time
-                    )
+            return {"message": f"Invalid type of document", "URL": path}
 
-                elif filename.endswith(".pptx") or filename.endswith(".ppt"):
-                    content = await asyncio.wait_for(
-                        extract_text_from_ppt(
-                            ppt_file=file), upload_timeout - request_time
-                    )
+    except asyncio.TimeoutError:
+        create_doc(
+            es,
+            doc_id=str(my_uuid),
+            path=path,
+            project_id=project_id,
+            user_id=user_id,
+            node_id=node_id,
+            type_id=type_id,
+            property_id=property_id,
+            node_name=node_name,
+            type_name=type_name,
+            property_name=property_name,
+            color=color,
+            default_image=default_image,
+            filename=name,
+            page=0,
+            page_content="",
+            created=str(gmt_plus_4_time_str),
+        )
 
-                elif filename.endswith(".xlsx"):
-                    content = await asyncio.wait_for(
-                        extract_text_from_xlsx(
-                            xlsx_file=file), upload_timeout - request_time
-                    )
+        return {"message": f"Document reading timeout", "URL": path}
 
-                elif filename.endswith(".xls"):
-                    content = await asyncio.wait_for(
-                        extract_text_from_xls(
-                            xls_file=file), upload_timeout - request_time
-                    )
+    except Exception as e:
+        create_doc(
+            es,
+            doc_id=str(my_uuid),
+            path=path,
+            project_id=project_id,
+            user_id=user_id,
+            node_id=node_id,
+            type_id=type_id,
+            property_id=property_id,
+            node_name=node_name,
+            type_name=type_name,
+            property_name=property_name,
+            color=color,
+            default_image=default_image,
+            filename=name,
+            page=0,
+            page_content="",
+            created=str(gmt_plus_4_time_str),
+        )
 
-                else:
-                    content = []
-
-            except Exception:
-                content = []
-
-    except Exception:
-
-        content = []
+        return {"message": "Failed to read document", "URL": path}
 
     finally:
         if file:
             file.close()
 
-    item['url'] = path
-    if content:
-        item['org_content'] = " ".join([item[0] for item in content])
-        item['content'] = " ".join([item[1]
-                                   for item in content])  # type: ignore
-    else:
-        item['content'] = ""
+    if texts:
+        for page_num, page_content in enumerate(texts):
+            current_utc_time = datetime.utcnow()
+            gmt_plus_4_time = current_utc_time.replace(tzinfo=pytz.utc).astimezone(
+                gmt_plus_4
+            )
 
-    item['created'] = await get_time_now()
-    item['keywords'] = []
+            gmt_plus_4_time_str = gmt_plus_4_time.strftime("%Y-%m-%d %H:%M:%S")
 
-
-async def update_fields(id_, id_value, fields_dict):
-    update_query = {
-        "script": {
-            "source": f"""if (ctx._source.{id_} == '{id_value}') 
-                    {{for (int i = 0; i < params.fields_dict.size(); i++) {{ for (entry in params.fields_dict.entrySet()) 
-                    {{String key = entry.getKey(); String value = entry.getValue(); if (ctx._source.containsKey(key) && ctx._source[key] != value) {{ctx._source[key] = value }}}}}}}}""",
-            "lang": "painless",
-            "params": {
-                    "fields_dict": fields_dict
-            }
-        },
-        "query": {"bool": {
-            "must": [{"term": {
-                f"{id_}.keyword": {
-                    "value": id_value
-                }
-            }
-            }
-            ]
-        }}
-    }
-
-    return es.update_by_query(index=ES_INDEX, body=update_query)
-
-
-async def update_nested_field(id_value, fields_dict):
-    update_query = {
-        "script": {
-            "source": f""" for (int i = 0; i < ctx._source.property.size(); i++) {{if (ctx._source.property[i].id == '{id_value}') {{ for (entry in params.fields_dict.entrySet()) 
-                    {{String key = entry.getKey(); String value = entry.getValue(); if (ctx._source.property[i].containsKey(key) && ctx._source.property[i][key] != value) {{ctx._source.property[i][key] = value }}}}}}}}""",
-            "lang": "painless",
-            "params": {
-                "fields_dict": fields_dict
-            }
-        },
-        "query": {"bool": {"must": [{"nested": {"path": "property", "query": {"term": {"property.id.keyword": id_value}}}}]}}
-
-    }
-
-    return es.update_by_query(index=ES_INDEX, body=update_query)
-
-
-@app.route("/update_type", methods=["POST"])
-async def update_type():
-
-    try:
-        type_id = request.json.get("type_id")
-        type_name = request.json.get("type_name")
-        color = request.json.get("color")
-
-    except:
-        abort(422, "Invalid raw data")
-
-    response = await update_fields(id_='type_id', id_value=type_id, fields_dict={"type_name": type_name, "color": color})
-
-    if response['total']:
-        message = "Type's fields were updated!"
+            # Print the page number and text content to the console
+            create_doc(
+                es,
+                doc_id=str(my_uuid),
+                path=path,
+                project_id=project_id,
+                user_id=user_id,
+                node_id=node_id,
+                type_id=type_id,
+                property_id=property_id,
+                node_name=node_name,
+                type_name=type_name,
+                property_name=property_name,
+                color=color,
+                default_image=default_image,
+                filename=name,
+                page=page_num + 1,
+                page_content=page_content,
+                created=str(gmt_plus_4_time_str),
+            )
 
     else:
-        message = "There is no type with that ID"
+        create_doc(
+            es,
+            doc_id=str(my_uuid),
+            path=path,
+            project_id=project_id,
+            user_id=user_id,
+            node_id=node_id,
+            type_id=type_id,
+            property_id=property_id,
+            node_name=node_name,
+            type_name=type_name,
+            property_name=property_name,
+            color=color,
+            default_image=default_image,
+            filename=name,
+            page=0,
+            page_content="",
+            created=str(gmt_plus_4_time_str),
+        )
 
-    return jsonify({"message": message, "status": 200})
-
-
-@app.route("/update_property", methods=["POST"])
-async def update_property():
-
-    try:
-        property_id = request.json.get("property_id")
-        property_name = request.json.get("property_name")
-        data_type = request.json.get("data_type")
-
-    except:
-        abort(422, "Invalid raw data")
-
-    response = await update_nested_field(id_value=property_id, fields_dict={"name": property_name, "data_type": data_type})
-
-    if response['total']:
-        message = "Property's fields were updated!"
-
-    else:
-        message = "There is no property with that ID"
-
-    return jsonify({"message": message, "status": 200})
-
-
-@app.route("/update_node", methods=["POST"])
-async def update_node():
-
-    try:
-        node_id = request.json.get("node_id")
-        node_name = request.json.get("node_name")
-        default_image = request.json.get("default_image")
-
-    except:
-        abort(422, "Invalid raw data")
-
-    response = await update_fields(id_='node_id', id_value=node_id, fields_dict={"node_name": node_name, "default_image": default_image})
-
-    # response = await update_nested_field(id_=changing_id, id_value=changing_id_value, field_=changing_field, field_value=changing_field_value)
-
-    if response['total']:
-        message = "Node's fields were updated!"
-
-    else:
-        message = "There is no node with that ID"
-
-    return jsonify({"message": message, "status": 200})
+    return {"message": f"Document was created in database", "URL": path}
 
 
 @app.route("/delete_node", methods=["DELETE"])
 async def delete_node():
-
     try:
-        project_id = request.json.get("project_id", None)
+        project_id = request.json["project_id"]
         node_id = request.json.get("node_id", None)
         property_id = request.json.get("property_id", None)
 
-    except:
-        abort(422, "Invalid raw data")
+    except Exception as e:
+        abort(422, f"Invalid raw data: {str(e)}")
 
-    non_nested_fields = {'project_id': project_id, 'node_id': node_id}
+    all_docs = await get_list(project_id=project_id, node_id=node_id, property_id=property_id)
 
-    if not property_id:
-        response = await delete_docs(non_nested_fields=non_nested_fields)
+    file_ids = list(
+        set(
+            [
+                (item["doc_id"], item["path"])
+                for item in all_docs.json["docs"]
+            ]
+        )
+    )
 
-    else:
-        update_script = {
-            "script": {
-                "source": """
-                    for (int i = 0; i < ctx._source.property.size(); i++) {
-                        if (ctx._source.property[i].id == params.propertyId) {
-                            ctx._source.property[i].data.clear();
-                            ctx._source.property.remove(i);
-                        }
-                    }
-                """,
-                "params": {
-                    "propertyId": property_id,
-                }
-            }
+    if not file_ids:
+        return {
+            "message": f"No document exists to be deleted."
         }
 
-        query = {
-            "bool": {
-                "must": [{"nested": {"path": "property", "query": {"term": {"property.id.keyword": property_id}}}}]}}
-
-        for field, value in non_nested_fields.items():
-            if value:
-                query['bool']['must'].append(
-                    {"term": {field + ".keyword": value}})
-
-        response = es.update_by_query(index=ES_INDEX, body={
-            "query": query,
-            "script": update_script["script"]
-        })
-
-        es.indices.refresh(index=ES_INDEX)
-        await delete_empty_docs()
-
-    if response['total']:
-        message = 'Documents were deleted!'
-
     else:
-        message = 'There is no document with given conditions'
-
-    return jsonify({"message": message, "status": 200})
+        delete_ids = [delete(doc_id[0], doc_id[1]) for doc_id in file_ids]
+        return {"messages": await asyncio.gather(*delete_ids)}
 
 
 def initialize_queries(keyword):
     query1 = {
-        "_source": {
-            "includes": ["user_id", "project_id", "color", "type_id", "type_name", "node_id", "node_name", "default_image"]
-        },
         "query": {
-            "nested": {
-                "path": "property",
-                "query": {
-                    "bool": {
-                        "should": [
-                            {
-                                "nested": {
-                                    "path": "property.data",
-                                    "query": {
-                                        "bool": {
-                                            "should": [
-                                                {
-                                                    "match": {
-                                                        "property.data.content": {
-                                                            "query": keyword.strip(),
-                                                            "operator": "AND",
-                                                            "fuzziness": "AUTO",
-                                                            "analyzer": "my_analyzer"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "query_string": {
-                                                        "query": "*" + keyword.strip() + "*",
-                                                        "analyzer": "my_analyzer"
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    "inner_hits": {
-                                        "name": "data_content",
-                                        "highlight": {
-                                            "pre_tags": ["<em>"],
-                                            "post_tags": ["</em>"],
-                                            "fields": {
-                                                "property.data.content": {
-                                                    "type": "plain",
-                                                    "fragmenter": "span",
-                                                    "number_of_fragments": 10000,
-                                                    "order": "score",
-                                                    "max_analyzed_offset": OFFSET
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "nested": {
-                                    "path": "property.data",
-                                    "query": {
-                                        "bool": {
-                                            "should": [
-                                                {
-                                                    "match": {
-                                                        "property.data.name": {
-                                                            "query": keyword.strip(),
-                                                            "operator": "AND",
-                                                            "fuzziness": "AUTO",
-                                                            "analyzer": "my_analyzer"
-                                                        }
-                                                    }
-                                                },
-                                                {
-                                                    "query_string": {
-                                                        "query": "*" + keyword.strip() + "*",
-                                                        "analyzer": "my_analyzer"
-                                                    }
-                                                }
-                                            ]
-                                        }
-                                    },
-                                    "inner_hits": {
-                                        "name": "data_name",
-                                        "highlight": {
-                                            "pre_tags": ["<em>"],
-                                            "post_tags": ["</em>"],
-                                            "fields": {
-                                                "property.data.name": {
-                                                    "type": "plain",
-                                                    "fragmenter": "span",
-                                                    "number_of_fragments": 1,
-                                                    "order": "score",
-                                                    "max_analyzed_offset": OFFSET
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+            "bool": {
+                "should": [
+                    {
+                        "match": {
+                            "page_content": {
+                                "query": keyword.strip(),
+                                "operator": "AND",
+                                "fuzziness": "AUTO",
+                                "analyzer": "my_analyzer",
                             }
-                        ]
-                    }
-                },
-                "inner_hits": {}
+                        }
+                    },
+                    {
+                        "query_string": {
+                            "query": "*" + keyword.strip() + "*",
+                            "analyzer": "my_analyzer",
+                        }
+                    },
+                    {
+                        "match": {
+                            "filename": {
+                                "query": keyword.strip(),
+                                "operator": "AND",
+                                "fuzziness": "AUTO",
+                                "analyzer": "my_analyzer",
+                            }
+                        }
+                    },
+                ]
             }
-        }
+        },
+        "highlight": {
+            "fields": {
+                "page_content": {
+                    "type": "plain",
+                    "fragmenter": "span",
+                    "number_of_fragments": 1000,
+                    "order": "score",
+                    "max_analyzed_offset": OFFSET,
+                },
+                "filename": {
+                    "type": "plain",
+                    "number_of_fragments": 0,
+                    "fragmenter": "span",
+                },
+            }
+        },
+        "_source": [
+            "path",
+            "page",
+            "project_id",
+            "node_id",
+            "user_id",
+            "type_id",
+            "property_id",
+            "type_name",
+            "property_name",
+            "node_name",
+            "filename",
+            "color",
+            "default_image",
+            "created",
+        ],
     }
 
     query2 = {
-        "_source": {
-            "includes": ["user_id", "project_id", "color", "type_id", "type_name", "node_id", "node_name", "default_image"]
-        },
         "query": {
-            "nested": {
-                "path": "property",
-                "query": {
-                    "bool": {
-                        "should": [
-                            {
-                                "nested": {
-                                    "path": "property.data",
-                                    "query": {
-                                        "span_near": {
-                                            "clauses": [],
-                                            "in_order": True
-                                        }
-                                    },
-                                    "inner_hits": {
-                                        "name": "data_content",
-                                        "highlight": {
-                                            "fields": {
-                                                "property.data.content": {
-                                                    "type": "plain",
-                                                    "fragmenter": "span",
-                                                    "number_of_fragments": 10000,
-                                                    "order": "score",
-                                                    "max_analyzed_offset": OFFSET
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "nested": {
-                                    "path": "property.data",
-                                    "query": {
-                                        "span_near": {
-                                            "clauses": [],
-                                            "in_order": True
-                                        }
-                                    },
-                                    "inner_hits": {
-                                        "name": "data_name",
-                                        "highlight": {
-                                            "fields": {
-                                                "property.data.name": {
-                                                    "type": "plain",
-                                                    "fragmenter": "span",
-                                                    "number_of_fragments": 0,
-                                                    "order": "score",
-                                                    "max_analyzed_offset": OFFSET
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            },
-                            {
-                                "nested": {
-                                    "path": "property",
-                                    "query": {
-                                        "match_all": {}
-                                    },
-                                    "inner_hits": {
-                                        "name": "property",
-                                        "highlight": {
-                                            "fields": {
-                                                "property.name": {
-                                                    "type": "plain",
-                                                    "fragmenter": "span",
-                                                    "number_of_fragments": 0,
-                                                    "order": "score",
-                                                    "max_analyzed_offset": 100000
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        ]
-                    }
+            "bool": {"must": [{"span_near": {"clauses": [], "in_order": "true"}}]}
+        },
+        "highlight": {
+            "fields": {
+                "page_content": {
+                    "type": "plain",
+                    "fragmenter": "span",
+                    "number_of_fragments": 1000,
+                    "order": "score",
+                    "max_analyzed_offset": OFFSET,
                 },
-                "inner_hits": {}
+                "filename": {
+                    "type": "plain",
+                    "number_of_fragments": 0,
+                    "fragmenter": "span",
+                },
             }
-        }
+        },
+        "_source": [
+            "path",
+            "page",
+            "project_id",
+            "node_id",
+            "user_id",
+            "type_id",
+            "property_id",
+            "type_name",
+            "property_name",
+            "node_name",
+            "filename",
+            "color",
+            "default_image",
+            "created",
+        ],
     }
 
     return query1, query2
@@ -1014,56 +931,27 @@ def sentence_search(keywords, query, method, scroll_timeout, scroll_size):
     for splited_text in keywords:
 
         if method == "regexp":
-            query["query"]["nested"]["query"]["bool"]["should"][0]["nested"]["query"]["span_near"]["clauses"].append(
+            query["query"]["bool"]["must"][0]["span_near"]["clauses"].append(
                 {
                     "span_multi": {
                         "match": {
                             "regexp": {
-                                "property.data.content": {
+                                "page_content": {
                                     "value": f".*{splited_text.strip().lower()}.*",
                                     "flags": "ALL"
-                                }
-                            }
-                        }
-                    }
-                }
-            )
-            query["query"]["nested"]["query"]["bool"]["should"][1]["nested"]["query"]["span_near"]["clauses"].append(
-                {
-                    "span_multi": {
-                        "match": {
-                            "regexp": {
-                                "property.data.content": {
-                                    "value": f".*{splited_text.strip().lower()}.*",
-                                    "flags": "ALL"
-                                }
-                            }
-                        }
-                    }
-                }
-            )
-
-        elif method == "fuzzy":
-            query["query"]["nested"]["query"]["bool"]["should"][0]["nested"]["query"]["span_near"]["clauses"].append(
-                {
-                    "span_multi": {
-                        "match": {
-                            "fuzzy": {
-                                "property.data.content": {
-                                    "value": splited_text.strip().lower(),
-                                    "fuzziness": "AUTO"
                                 }
                             },
                         }
                     }
                 }
             )
-            query["query"]["nested"]["query"]["bool"]["should"][1]["nested"]["query"]["span_near"]["clauses"].append(
+        elif method == "fuzzy":
+            query["query"]["bool"]["must"][0]["span_near"]["clauses"].append(
                 {
                     "span_multi": {
                         "match": {
                             "fuzzy": {
-                                "property.data.content": {
+                                "page_content": {
                                     "value": splited_text.strip().lower(),
                                     "fuzziness": "AUTO"
                                 }
@@ -1089,7 +977,7 @@ def sentence_search(keywords, query, method, scroll_timeout, scroll_size):
 
 
 @app.route("/search", methods=["POST"])
-def search():
+def get_page():
     try:
         keyword = request.json["search"]
         page = request.json["page"]
@@ -1099,8 +987,8 @@ def search():
         sortOrder = request.json["sortOrder"]
         sortField = request.json["sortField"]
 
-    except:
-        abort(422, "Invalid raw data")
+    except Exception as e:
+        abort(422, f"Invalid raw data: {str(e)}")
 
     if len(keyword.strip()) < 3:
         abort(422, "Search terms must contain at least 3 characters")
@@ -1144,7 +1032,6 @@ def search():
             result = es.search(
                 index=ES_INDEX, body=query1, scroll=scroll_timeout, size=scroll_size
             )
-            hits = result["hits"]["hits"]
 
         except ConnectionError:
             abort(408, "Elasticsearch : Connection Timeout error")
@@ -1152,13 +1039,15 @@ def search():
         except Exception as e:
             abort(500, str(e))
 
+        hits = result["hits"]["hits"]
+
     else:
         result, hits = sentence_search(
             keywords, query2, "regexp", scroll_timeout, scroll_size)
 
         if not hits:
             try:
-                query2["query"]['nested']["query"]["bool"]["should"][0]["nested"]["query"]["span_near"]["in_order"] = "false"
+                query2["query"]["bool"]["must"][0]["span_near"]["in_order"] = "false"
                 result = es.search(
                     index=ES_INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
                 )
@@ -1179,7 +1068,7 @@ def search():
 
                 if not hits:
                     try:
-                        query2["query"]['nested']["query"]["bool"]["should"][0]["nested"]["query"]["span_near"]["in_order"] = "false"
+                        query2["query"]["bool"]["must"][0]["span_near"]["in_order"] = "false"
                         result = es.search(
                             index=ES_INDEX, body=query2, scroll=scroll_timeout, size=scroll_size
                         )
@@ -1194,18 +1083,15 @@ def search():
                     if not hits:
                         try:
                             keyword = keyword.replace(" ", "")
-                            query1["query"]['nested']['query']["bool"]["should"][0]['nested']['query']["bool"]["should"][0]["match"]["property.data.content"][
+                            query1["query"]["bool"]["should"][0]["match"]["page_content"][
                                 "query"
                             ] = keyword
-                            query1["query"]['nested']['query']["bool"]["should"][0]['nested']['query']["bool"]["should"][1]["query_string"]["query"] = (
+                            query1["query"]["bool"]["should"][1]["query_string"]["query"] = (
                                 "*" + keyword + "*"
                             )
-                            query1["query"]['nested']['query']["bool"]["should"][1]['nested']['query']["bool"]["should"][0]["match"]["property.data.name"][
+                            query1["query"]["bool"]["should"][2]["match"]["filename"][
                                 "query"
                             ] = keyword
-                            query1["query"]['nested']['query']["bool"]["should"][1]['nested']['query']["bool"]["should"][1]["query_string"]["query"] = (
-                                "*" + keyword + "*"
-                            )
 
                             result = es.search(
                                 index=ES_INDEX,
@@ -1220,8 +1106,7 @@ def search():
                         except Exception as e:
                             abort(500, str(e))
 
-    rows = []
-
+    sentences = {}
     while hits:
         # Scroll to the next batch of results
         for hit in hits:
@@ -1277,13 +1162,45 @@ def search():
                 rows.append(property_dict.copy())
 
         scroll_id = result.get("_scroll_id")
-
         try:
             result = es.scroll(scroll_id=scroll_id, scroll=scroll_timeout)
         except Exception as e:
             abort(500, str(e))
 
         hits = result["hits"]["hits"]
+
+    rows = []
+    for url, item in sentences.items():
+        new_dict = defaultdict()
+        item["path"] = url[0]
+        keys = (
+            "node_id",
+            "node_name",
+            "project_id",
+            "property_id",
+            "property_name",
+            "type_id",
+            "type_name",
+            "color",
+            "default_image",
+        )
+
+        for key in keys:
+            new_dict[key] = item[key]
+            del item[key]
+
+        if new_dict["node_id"] not in [row["node_id"] for row in rows]:
+            new_dict["updated"] = item["created"]
+            new_dict["data"] = [item]
+            rows.append(new_dict)
+
+        else:
+            for i, data in enumerate(rows):
+                if data["node_id"] == new_dict["node_id"]:
+                    break
+            updated = max(item["created"], rows[i]["updated"])
+            rows[i]["updated"] = updated
+            rows[i]["data"].append(item)
 
     if sortOrder == "DESC" and sortField == "name":
         rows.sort(key=lambda x: x["type_name"], reverse=True)
@@ -1298,7 +1215,7 @@ def search():
 
     return jsonify(
         {
-            "rows": rows[limit * (page - 1): limit * page],  # type: ignore
+            "rows": rows[limit * (page - 1): limit * page],
             "count": len(rows),
             "status": 200,
         }
@@ -1345,7 +1262,24 @@ async def get_list(**search):
     documents = []
     while total_results > 0:
         for hit in initial_search["hits"]["hits"]:
-            documents.append(hit["_source"])
+            document = {
+                "filename": hit["_source"]["filename"],
+                "doc_id": hit["_source"]["doc_id"],
+                "type_id": hit["_source"]["type_id"],
+                "type_name": hit["_source"]["type_name"],
+                "property_id": hit["_source"]["property_id"],
+                "property_name": hit["_source"]["property_name"],
+                "page": hit["_source"]["page"],
+                "page_content": hit["_source"]["page_content"],
+                "created": hit["_source"]["created"],
+                "project_id": hit["_source"]["project_id"],
+                "node_id": hit["_source"]["node_id"],
+                "node_name": hit["_source"]["node_name"],
+                "default_image": hit["_source"]["default_image"],
+                "color": hit["_source"]["color"],
+                "path": hit["_source"]["path"],
+            }
+            documents.append(document)
 
         # Perform the next scroll request
         initial_search = es.scroll(scroll_id=scroll_id, scroll="1s")
@@ -1356,8 +1290,27 @@ async def get_list(**search):
 
     # Clear the scroll context when done
     es.clear_scroll(scroll_id=scroll_id)
+    # Print the list of documents
 
     return jsonify({"docs": documents, "status": 200})
+
+
+# @app.route("/delete/<string:document_id>", methods=["DELETE"])
+async def delete(document_id, path):
+    query = {"query": {"term": {"doc_id.keyword": document_id}}}
+
+    # Use the delete_by_query API to delete all documents that match the query
+    try:
+        response = es.delete_by_query(
+            index=ES_INDEX, body=query, scroll_size=10000)
+
+    except Exception as e:
+        abort(409, str(e))
+
+    if response["deleted"]:
+        return {"message": "Document was deleted from database.", "URL": path}
+    else:
+        return {"message": "Document doesn't exist in database.", "URL": path}
 
 
 @app.route("/clean", methods=["DELETE"])
@@ -1384,7 +1337,7 @@ def sort_dict(my_dict: dict):
     }
 
 
-def get_count(nodes: list, source_target: list = None) -> dict:  # type: ignore
+def get_count(nodes: list, source_target: list = None) -> dict:
     if not source_target:
         source_target = nodes
     return {node: source_target.count(node) for node in set(nodes)}
@@ -1755,8 +1708,8 @@ async def expand_tag():
 
 namespace = uuid.NAMESPACE_DNS
 
-SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}'
-FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml"
+SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509'
+FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509"
 
 
 def convert_date(pubDate):
@@ -1766,7 +1719,7 @@ def convert_date(pubDate):
         "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"
     }
     day = pubDate.get("Day", '01')
-    month = months.get(pubDate["Month"], '01')
+    month = months.get(pubDate.get("Month", '01'), '01')
     year = pubDate["Year"]
     return f"{year}-{month}-{day}"
 
@@ -1832,7 +1785,7 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
                     }
                     for author in authors if (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()
                 ]
-
+                
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
                 if not isinstance(keywords, list):
                     keywords = [keywords]
@@ -2024,4 +1977,22 @@ async def migration():
         return jsonify({"status": 200})
 
     except Exception as e:
-        abort(500, str(e))
+        abort(422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
+        
+    if len(keyword) < 3:
+        abort(400, "Keyword must be at least 3 characters long")
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            search_result = await asyncio.wait_for(search_with_retry(session, keyword, limit, (page-1)*limit), timeout=30)
+            id_list = search_result['esearchresult']['idlist']
+            await asyncio.sleep(0.1)
+            
+            tasks = [fetch_with_retry(session, id) for id in id_list]
+            all_data = await asyncio.gather(*[asyncio.wait_for(task, timeout=20) for task in tasks])
+
+        all_data = [data for data in all_data if data]
+
+        return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
+    except asyncio.TimeoutError:
+        abort(500, "The request timed out. Please try again later.")
