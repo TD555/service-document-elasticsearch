@@ -81,11 +81,11 @@ def extract(doc_text):
             match = re.search(keywords_pattern_en, doc_text)
             if match and match.group(1) is not None:
                 if ',' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(',')[:]]
+                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(',')[:] if key.strip().title()]
                 elif ';' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(';')[:]]
+                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(';')[:] if key.strip().title()]
                 elif '·' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split('·')[:]]
+                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split('·')[:] if key.strip().title()]
                 else: 
                     all_keys = []
             else: 
@@ -187,7 +187,7 @@ def extract(doc_text):
     else:
         j = 0
     
-    all_keys.extend([{'name' : item[0], 'score' : scaled_keys[:i][idx_i][0] * 18 - 8} for idx_i, item in enumerate(sorted_keys[:i]) if item[0].lower() not in [key['name'].lower() for key in all_keys]] + 
-                     [{'name' : item[0], 'score' : scaled_compounds[:j][idx_j][0] * 18 - 8} for idx_j, item in enumerate(sorted_compounds[:j]) if item[0].lower() not in [key['name'].lower() for key in all_keys]])
+    all_keys.extend([{'name' : item[0], 'score' : scaled_keys[:i][idx_i][0] * 18 - 8} for idx_i, item in enumerate(sorted_keys[:i]) if item[0] and item[0].lower() not in [key['name'].lower() for key in all_keys]] + 
+                     [{'name' : item[0], 'score' : scaled_compounds[:j][idx_j][0] * 18 - 8} for idx_j, item in enumerate(sorted_compounds[:j]) if  item[0] and item[0].lower() not in [key['name'].lower() for key in all_keys]])
 
     return all_keys[:20]
