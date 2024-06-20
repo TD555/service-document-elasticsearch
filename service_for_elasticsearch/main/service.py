@@ -1286,13 +1286,13 @@ def search():
         hits = result["hits"]["hits"]
 
     if sortOrder == "DESC" and sortField == "name":
-        rows.sort(key=lambda x: x["type_name"], reverse=True)
+        rows.sort(key=lambda x: x["node_name"], reverse=True)
     elif sortOrder == "DESC" and sortField == "updated_at":
-        rows.sort(key=lambda x: x["updated"], reverse=True)
+        rows.sort(key=lambda x: x["created"], reverse=True)
     elif sortOrder == "ASC" and sortField == "name":
-        rows.sort(key=lambda x: x["type_name"])
+        rows.sort(key=lambda x: x["node_name"])
     elif sortOrder == "ASC" and sortField == "updated_at":
-        rows.sort(key=lambda x: x["updated"])
+        rows.sort(key=lambda x: x["created"])
     else:
         abort(403, "Invalid sortOrder and/or sortField value")
 
@@ -1669,10 +1669,11 @@ async def generate_tags():
         # project_id = request.json['project_id']
         # node_id = request.json['node_id']
         # property_id = request.json['property_id']
-        url = request.json['url']
+        url = check_base_url_exists(request.json['url'])
     except:
         abort(422, "Invalid raw data")
 
+    print(await get_tags(url))
     result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
     all_dict = defaultdict(list)
     if result:
@@ -1701,7 +1702,7 @@ async def get_similar_docs():
         # project_id = request.json['project_id']
         # node_id = request.json['node_id']
         # property_id = request.json['property_id']
-        url = request.json['url']
+        url = check_base_url_exists(request.json['url'])
     except:
         abort(422, "Invalid raw data")
 
@@ -1732,7 +1733,7 @@ async def get_similar_docs():
 async def expand_tag():
     try:
         keyword = request.json['keyword']
-        url = request.json['url']
+        url = check_base_url_exists(request.json['url'])
     except:
         abort(422, "Invalid raw data")
 
