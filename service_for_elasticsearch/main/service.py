@@ -241,8 +241,12 @@ async def extract_text_from_xlsx(xlsx_file):
         for row in sheet.iter_rows(values_only=True):
             row_str.append(" ".join(map(str, row)))
 
-        all_texts.append(sheet_name + " " + " ".join(row_str).strip())
-
+        text = sheet_name + " " + " ".join(row_str).strip()
+        clean_text = text.replace("\n", " ")
+        clean_text = re.sub(r'\s+', ' ', clean_text)
+        
+        all_texts.append((text, clean_text))
+        
     workbook.close()
     temp_buffer.close()
 
@@ -630,7 +634,7 @@ async def get_content(item):
     finally:
         if file:
             file.close()
-
+    
     item['url'] = path
     if content:
         item['org_content'] = " ".join([item[0] for item in content])
