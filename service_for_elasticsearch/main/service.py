@@ -241,8 +241,12 @@ async def extract_text_from_xlsx(xlsx_file):
         for row in sheet.iter_rows(values_only=True):
             row_str.append(" ".join(map(str, row)))
 
-        all_texts.append(sheet_name + " " + " ".join(row_str).strip())
-
+        text = sheet_name + " " + " ".join(row_str).strip()
+        clean_text = text.replace("\n", " ")
+        clean_text = re.sub(r'\s+', ' ', clean_text)
+        
+        all_texts.append((text, clean_text))
+        
     workbook.close()
     temp_buffer.close()
 
@@ -630,7 +634,7 @@ async def get_content(item):
     finally:
         if file:
             file.close()
-
+    
     item['url'] = path
     if content:
         item['org_content'] = " ".join([item[0] for item in content])
@@ -1673,8 +1677,11 @@ async def generate_tags():
     except:
         abort(422, "Invalid raw data")
 
-    print(await get_tags(url))
-    result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
+    # print(await get_tags(url))
+    if (await get_tags(url))['hits']['hits']:
+        result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
+    else: abort(500, "There is no document with tags")
+        
     all_dict = defaultdict(list)
     if result:
         keywords = result[0]['_source']
@@ -1756,8 +1763,8 @@ async def expand_tag():
 
 namespace = uuid.NAMESPACE_DNS
 
-SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509'
-FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509"
+SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=0587a88dd5dcd5fab78a8bf379542622b509'
+FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key=0587a88dd5dcd5fab78a8bf379542622b509"
 
 
 def convert_date(pubDate):
