@@ -1755,8 +1755,8 @@ async def expand_tag():
 
 namespace = uuid.NAMESPACE_DNS
 
-SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}'
-FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml"
+SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509'
+FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key=c9bd3ddf46e667ff7ebd7f9f660c51edc509"
 
 
 def convert_date(pubDate):
@@ -1766,13 +1766,18 @@ def convert_date(pubDate):
         "Sep": "09", "Oct": "10", "Nov": "11", "Dec": "12"
     }
     day = pubDate.get("Day", '01')
-    month = months.get(pubDate["Month"], '01')
+    month = months.get(pubDate.get("Month", '01'), '01')
     year = pubDate["Year"]
     return f"{year}-{month}-{day}"
 
 
-def convert_to_text(item):
-    return item.get("#text", "") if isinstance(item, dict) else item
+def convert_to_text(item, abstract=False):
+    if isinstance(item, dict):
+        return item.get("#text", "")
+    if abstract and isinstance(item, list):
+        text = '\n\n'.join([element["@Label"] + '\n' + element["#text"] for element in item])
+        return text  
+    return item
 
 
 async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
@@ -1783,9 +1788,8 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
                 xml_file = await response.text()
                 xml_data = ET.fromstring(xml_file)
                 xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
-                dict_data = dict(xmltodict.parse(xmlstr))[
-                    'PubmedArticleSet']['PubmedArticle']['MedlineCitation']
-
+                dict_data = dict(xmltodict.parse(xmlstr))['PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+                
                 title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
                     'article': {
@@ -1803,16 +1807,13 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
 
                 elocation = dict_data['Article'].get('ELocationID')
                 if isinstance(elocation, dict) and elocation.get('@EIdType') == 'doi':
-                    id_data['article']['article_url'] = 'https://www.doi.org/' + \
-                        elocation.get('#text', '')
+                    id_data['article']['article_url'] = 'https://www.doi.org/' + elocation.get('#text', '')
                 elif isinstance(elocation, list):
                     for eid in elocation:
                         if eid.get('@EIdType') == 'doi':
-                            id_data['article']['article_url'] = 'https://www.doi.org/' + \
-                                eid.get('#text', '')
+                            id_data['article']['article_url'] = 'https://www.doi.org/' + eid.get('#text', '')
 
-                authors = dict_data['Article'].get(
-                    'AuthorList', {'Author': []})['Author']
+                authors = dict_data['Article'].get('AuthorList', {'Author': []})['Author']
                 if isinstance(authors, list):
                     authors = authors[:20]
                 else:
@@ -1832,12 +1833,11 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
                     }
                     for author in authors if (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()
                 ]
-
+                
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
                 if not isinstance(keywords, list):
                     keywords = [keywords]
-                id_data['keywords'] = [keyword.get(
-                    "#text", "") for keyword in keywords] if keywords else []
+                id_data['keywords'] = [keyword.get("#text", "") for keyword in keywords] if keywords else []
 
                 return id_data
 
@@ -1852,7 +1852,6 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
             print(f"Error processing ID {id}: {e}")
             break
             abort(500, f"Error processing ID {id}: {e}")
-
 
 async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
@@ -1871,7 +1870,6 @@ async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, 
             print(f"Error processing keyword {keyword}: {e}")
             abort(500, f"Error processing keyword {keyword}: {e}")
 
-
 @app.route('/pubmed/get_data', methods=["POST"])
 async def pubmed_preview():
     try:
@@ -1879,18 +1877,17 @@ async def pubmed_preview():
         limit = request.json.get('limit', 5)
         page = int(request.json.get('page', 1))
     except Exception as e:
-        abort(
-            422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
-
+        abort(422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
+        
     if len(keyword) < 3:
         abort(400, "Keyword must be at least 3 characters long")
-
+    
     try:
         async with aiohttp.ClientSession() as session:
             search_result = await asyncio.wait_for(search_with_retry(session, keyword, limit, (page-1)*limit), timeout=10)
             id_list = search_result['esearchresult']['idlist']
             await asyncio.sleep(0.1)
-
+            
             tasks = [fetch_with_retry(session, id) for id in id_list]
             all_data = await asyncio.gather(*[asyncio.wait_for(task, timeout=20) for task in tasks])
 
@@ -1899,6 +1896,7 @@ async def pubmed_preview():
         return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
     except asyncio.TimeoutError:
         abort(500, "The request timed out. Please try again later.")
+
 
 
 get_all_query = """SELECT np.user_id, np.project_id, n.project_type_id as type_id, pnt.name as type_name, pnt.color as color, np.node_id, n.name as node_name, n.default_image, np.project_type_property_id as property_id, pntp.name as property_name, 'doc' AS type, np.nodes_data, np.created_at as created
