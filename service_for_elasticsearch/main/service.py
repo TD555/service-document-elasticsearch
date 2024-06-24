@@ -32,28 +32,28 @@ from keyword_extraction import keyword_extractor
 app = Flask(__name__)
 
 
-OLD_ES_INDEX = "araks_index_pre"
-ES_INDEX = "araks_index_v2"
-AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-ES_HOST = "http://localhost:9201/"
+# OLD_ES_INDEX = "araks_index_pre"
+# ES_INDEX = "araks_index_v2"
+# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+# ES_HOST = "http://localhost:9201/"
 
-DATABASE_HOST = 'localhost'
-# DATABASE_HOST = 'host.docker.internal'
-DATABASE_NAME = 'araks_db'
-DATABASE_USER = 'postgres'
-DATABASE_PASSWORD = 'Tik.555'
-DATABASE_PORT = 5433
+# DATABASE_HOST = 'localhost'
+# # DATABASE_HOST = 'host.docker.internal'
+# DATABASE_NAME = 'araks_db'
+# DATABASE_USER = 'postgres'
+# DATABASE_PASSWORD = 'Tik.555'
+# DATABASE_PORT = 5433
 
-# OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
-# ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
-# AMAZON_URL = os.environ['AMAZON_URL']
-# ES_HOST = os.environ['ELASTICSEARCH_URL']
+OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
+AMAZON_URL = os.environ['AMAZON_URL']
+ES_HOST = os.environ['ELASTICSEARCH_URL']
 
-# DATABASE_NAME = os.environ['DB_NAME']
-# DATABASE_USER = os.environ['DB_USER']
-# DATABASE_HOST = os.environ['DB_HOST']
-# DATABASE_PASSWORD = os.environ['DB_PASSWORD']
-# DATABASE_PORT = os.environ['DB_PORT']
+DATABASE_NAME = os.environ['DB_NAME']
+DATABASE_USER = os.environ['DB_USER']
+DATABASE_HOST = os.environ['DB_HOST']
+DATABASE_PASSWORD = os.environ['DB_PASSWORD']
+DATABASE_PORT = os.environ['DB_PORT']
 
 es = Elasticsearch([ES_HOST])
 
@@ -1665,7 +1665,6 @@ async def get_related_docs(keyword, url):
                 }
             }
         }
-
     )
 
 
@@ -1684,25 +1683,17 @@ async def generate_tags():
         result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
     else: abort(500, "There is no document with tags")
         
-    all_dict = defaultdict(list)
+        
     if result:
         keywords = result[0]['_source']
         for i, keyword in enumerate(keywords['keywords']):
             result = (await get_related_docs(keyword['name'], url))['hits']['hits']
-            for node in result:
-                for property in node['inner_hits']["property"]['hits']['hits']:
-                    all_dict[keyword['name']] = [property_data["_source"]['url']
-                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']]
-            keywords['keywords'][i]['count'] = len(all_dict[keyword['name']])
+            keywords['keywords'][i]['count'] = len(result)
 
-        all_urls = []
 
-        for urls in all_dict.values():
-            all_urls.extend(urls)
-
-        return jsonify(**keywords, **{'all_length': len(set(all_urls))}, **{'url': url}, **{'status': 200})
+        return jsonify(**keywords,  **{'url': url}, **{'status': 200})
     else:
-        return jsonify({'keywords': [], 'all_length': 0, 'url': url, 'status': 200})
+        return jsonify({'keywords': [], 'url': url, 'status': 200})
 
 
 @app.route('/similar_docs', methods=["POST"])
@@ -1717,25 +1708,34 @@ async def get_similar_docs():
 
     result = (await get_tags(url))['hits']['hits']
     data = []
-
+    
+    all_dict = defaultdict(list)
     if result:
         keywords = result[0]['_source']['property'][0]['data'][0]
-        for _, keyword in enumerate(keywords['keywords']):
+        for i, keyword in enumerate(keywords['keywords']):
             result = (await get_related_docs(keyword['name'], url))['hits']['hits']
             for node in result:
                 response_dict = {}
                 response_dict.update(node["_source"])
                 for property in node['inner_hits']["property"]['hits']['hits']:
+                    all_dict[keyword['name']] = [property_data["_source"]['url']
+                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']]
                     response_dict.update(
                         {"property_" + k: v for k, v in property["_source"].items()})
                     for property_data in property['inner_hits']["property.data"]['hits']['hits']:
                         response_dict.update(property_data["_source"])
                         if response_dict not in data:
                             data.append(response_dict.copy())
+            keywords['keywords'][i]['count'] = len(result)
+        
+        all_urls = []
 
-        return jsonify(**{'data': data}, **{'status': 200})
+        for urls in all_dict.values():
+            all_urls.extend(urls)
+            
+        return jsonify(**{'all_doc_count': len(set(all_urls))}, **{'data': data}, **{'keywords' : keywords['keywords']}, **{'status': 200})
     else:
-        return jsonify({'data': [], 'status': 200})
+        return jsonify({'all_doc_count' : 0, 'data': [], 'keywords' : [], 'status': 200})
 
 
 @app.route('/expand_tag', methods=["POST"])
