@@ -1231,22 +1231,22 @@ def search():
         for hit in hits:
             if project_id != hit['_source']['project_id'] or not (hit["_source"]["type_id"] in list_type_id or not list_type_id):
                 continue
-
             property_dict = {"user_id": hit['_source']['user_id'],
-                             "project_id": hit['_source']['project_id'],
-                             "type_id": hit['_source']['type_id'],
-                             "type_name": hit['_source']['type_name'],
-                             "color": hit['_source']['color'],
-                             "default_image": hit['_source']['default_image'],
-                             "node_id": hit['_source']['node_id'],
-                             "node_name": hit['_source']['node_name']
-                             }
+                            "project_id": hit['_source']['project_id'],
+                            "type_id": hit['_source']['type_id'],
+                            "type_name": hit['_source']['type_name'],
+                            "color": hit['_source']['color'],
+                            "default_image": hit['_source']['default_image'],
+                            "node_id": hit['_source']['node_id'],
+                            "node_name": hit['_source']['node_name']
+                            }
+            
+            property_dict['data'] = []
             for property_hit in hit['inner_hits']['property']['hits']['hits']:
-
-                property_dict['property_id'] = property_hit['_source']['id']
-                property_dict['property_name'] = property_hit['_source']['name']
+                
                 property_dict['data_type'] = property_hit['_source']['data_type']
-                property_dict['data'] = []
+                # property_dict['property_id'] = property_hit['_source']['id']
+                # property_dict['property_name'] = property_hit['_source']['name']
 
                 for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
                     data_dict = {}
@@ -1277,9 +1277,11 @@ def search():
                     data_dict["filename"] = data_hit['_source']['name']
 
                     property_dict['data'].append(data_dict)
-
-                rows.append(property_dict.copy())
-
+                    
+            property_dict['updated'] = max(item['created'] for item in property_dict['data'])
+            
+            rows.append(property_dict.copy())
+        
         scroll_id = result.get("_scroll_id")
 
         try:
@@ -1292,11 +1294,11 @@ def search():
     if sortOrder == "DESC" and sortField == "name":
         rows.sort(key=lambda x: x["node_name"], reverse=True)
     elif sortOrder == "DESC" and sortField == "updated_at":
-        rows.sort(key=lambda x: x["created"], reverse=True)
+        rows.sort(key=lambda x: x["updated"], reverse=True)
     elif sortOrder == "ASC" and sortField == "name":
         rows.sort(key=lambda x: x["node_name"])
     elif sortOrder == "ASC" and sortField == "updated_at":
-        rows.sort(key=lambda x: x["created"])
+        rows.sort(key=lambda x: x["updated"])
     else:
         abort(403, "Invalid sortOrder and/or sortField value")
 
@@ -1663,7 +1665,6 @@ async def get_related_docs(keyword, url):
                 }
             }
         }
-
     )
 
 
@@ -1682,25 +1683,17 @@ async def generate_tags():
         result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
     else: abort(500, "There is no document with tags")
         
-    all_dict = defaultdict(list)
+        
     if result:
         keywords = result[0]['_source']
         for i, keyword in enumerate(keywords['keywords']):
             result = (await get_related_docs(keyword['name'], url))['hits']['hits']
-            for node in result:
-                for property in node['inner_hits']["property"]['hits']['hits']:
-                    all_dict[keyword['name']] = [property_data["_source"]['url']
-                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']]
-            keywords['keywords'][i]['count'] = len(all_dict[keyword['name']])
+            keywords['keywords'][i]['count'] = len(result)
 
-        all_urls = []
 
-        for urls in all_dict.values():
-            all_urls.extend(urls)
-
-        return jsonify(**keywords, **{'all_length': len(set(all_urls))}, **{'url': url}, **{'status': 200})
+        return jsonify(**keywords,  **{'url': url}, **{'status': 200})
     else:
-        return jsonify({'keywords': [], 'all_length': 0, 'url': url, 'status': 200})
+        return jsonify({'keywords': [], 'url': url, 'status': 200})
 
 
 @app.route('/similar_docs', methods=["POST"])
@@ -1715,25 +1708,34 @@ async def get_similar_docs():
 
     result = (await get_tags(url))['hits']['hits']
     data = []
-
+    
+    all_dict = defaultdict(list)
     if result:
         keywords = result[0]['_source']['property'][0]['data'][0]
-        for _, keyword in enumerate(keywords['keywords']):
+        for i, keyword in enumerate(keywords['keywords']):
             result = (await get_related_docs(keyword['name'], url))['hits']['hits']
             for node in result:
                 response_dict = {}
                 response_dict.update(node["_source"])
                 for property in node['inner_hits']["property"]['hits']['hits']:
+                    all_dict[keyword['name']] = [property_data["_source"]['url']
+                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']]
                     response_dict.update(
                         {"property_" + k: v for k, v in property["_source"].items()})
                     for property_data in property['inner_hits']["property.data"]['hits']['hits']:
                         response_dict.update(property_data["_source"])
                         if response_dict not in data:
                             data.append(response_dict.copy())
+            keywords['keywords'][i]['count'] = len(result)
+        
+        all_urls = []
 
-        return jsonify(**{'data': data}, **{'status': 200})
+        for urls in all_dict.values():
+            all_urls.extend(urls)
+            
+        return jsonify(**{'all_doc_count': len(set(all_urls))}, **{'data': data}, **{'keywords' : keywords['keywords']}, **{'status': 200})
     else:
-        return jsonify({'data': [], 'status': 200})
+        return jsonify({'all_doc_count' : 0, 'data': [], 'keywords' : [], 'status': 200})
 
 
 @app.route('/expand_tag', methods=["POST"])
