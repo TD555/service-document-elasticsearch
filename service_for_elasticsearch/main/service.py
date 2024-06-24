@@ -32,28 +32,28 @@ from keyword_extraction import keyword_extractor
 app = Flask(__name__)
 
 
-# OLD_ES_INDEX = "araks_index_pre"
-# ES_INDEX = "araks_index_v2"
-# AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
-# ES_HOST = "http://localhost:9201/"
+OLD_ES_INDEX = "araks_index_pre"
+ES_INDEX = "araks_index_v2"
+AMAZON_URL = "https://araks-projects-develop.s3.amazonaws.com/"
+ES_HOST = "http://localhost:9201/"
 
-# DATABASE_HOST = 'localhost'
-# # DATABASE_HOST = 'host.docker.internal'
-# DATABASE_NAME = 'araks_db'
-# DATABASE_USER = 'postgres'
-# DATABASE_PASSWORD = 'Tik.555'
-# DATABASE_PORT = 5433
+DATABASE_HOST = 'localhost'
+# DATABASE_HOST = 'host.docker.internal'
+DATABASE_NAME = 'araks_db'
+DATABASE_USER = 'postgres'
+DATABASE_PASSWORD = 'Tik.555'
+DATABASE_PORT = 5433
 
-OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
-ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
-AMAZON_URL = os.environ['AMAZON_URL']
-ES_HOST = os.environ['ELASTICSEARCH_URL']
+# OLD_ES_INDEX = os.environ['ELASTICSEARCH_INDEX']
+# ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
+# AMAZON_URL = os.environ['AMAZON_URL']
+# ES_HOST = os.environ['ELASTICSEARCH_URL']
 
-DATABASE_NAME = os.environ['DB_NAME']
-DATABASE_USER = os.environ['DB_USER']
-DATABASE_HOST = os.environ['DB_HOST']
-DATABASE_PASSWORD = os.environ['DB_PASSWORD']
-DATABASE_PORT = os.environ['DB_PORT']
+# DATABASE_NAME = os.environ['DB_NAME']
+# DATABASE_USER = os.environ['DB_USER']
+# DATABASE_HOST = os.environ['DB_HOST']
+# DATABASE_PASSWORD = os.environ['DB_PASSWORD']
+# DATABASE_PORT = os.environ['DB_PORT']
 
 es = Elasticsearch([ES_HOST])
 
@@ -1231,55 +1231,89 @@ def search():
         for hit in hits:
             if project_id != hit['_source']['project_id'] or not (hit["_source"]["type_id"] in list_type_id or not list_type_id):
                 continue
-
-            property_dict = {"user_id": hit['_source']['user_id'],
-                             "project_id": hit['_source']['project_id'],
-                             "type_id": hit['_source']['type_id'],
-                             "type_name": hit['_source']['type_name'],
-                             "color": hit['_source']['color'],
-                             "default_image": hit['_source']['default_image'],
-                             "node_id": hit['_source']['node_id'],
-                             "node_name": hit['_source']['node_name']
-                             }
-            for property_hit in hit['inner_hits']['property']['hits']['hits']:
-
-                property_dict['property_id'] = property_hit['_source']['id']
-                property_dict['property_name'] = property_hit['_source']['name']
-                property_dict['data_type'] = property_hit['_source']['data_type']
+            if hit['_source']['node_id'] not in [row["node_id"] for row in rows]:
+                print(hit['_source']['node_id'])
+                property_dict = {"user_id": hit['_source']['user_id'],
+                                "project_id": hit['_source']['project_id'],
+                                "type_id": hit['_source']['type_id'],
+                                "type_name": hit['_source']['type_name'],
+                                "color": hit['_source']['color'],
+                                "default_image": hit['_source']['default_image'],
+                                "node_id": hit['_source']['node_id'],
+                                "node_name": hit['_source']['node_name']
+                                }
+                
                 property_dict['data'] = []
+                for property_hit in hit['inner_hits']['property']['hits']['hits']:
+                    
+                    property_dict['data_type'] = property_hit['_source']['data_type']
+                    # property_dict['property_id'] = property_hit['_source']['id']
+                    # property_dict['property_name'] = property_hit['_source']['name']
 
-                for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
-                    data_dict = {}
-                    data_dict["path"] = check_base_url_exists(
-                        data_hit['_source']['url'])
-                    data_dict["match_count"] = 0
+                    for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
+                        data_dict = {}
+                        data_dict["path"] = check_base_url_exists(
+                            data_hit['_source']['url'])
+                        data_dict["match_count"] = 0
 
-                    if 'highlight' in data_hit:
-                        data_dict["match_content"] = data_hit['highlight'].get(
-                            'property.data.content')[0].strip()
-                        for content in data_hit['highlight'].get(
-                                'property.data.content'):
-                            data_dict["match_count"] += int(
-                                len(re.findall(r"<em>(.*?)</em>", content)))
-                    else:
-                        data_dict["match_content"] = ''
+                        if 'highlight' in data_hit:
+                            data_dict["match_content"] = data_hit['highlight'].get(
+                                'property.data.content')[0].strip()
+                            for content in data_hit['highlight'].get(
+                                    'property.data.content'):
+                                data_dict["match_count"] += int(
+                                    len(re.findall(r"<em>(.*?)</em>", content)))
+                        else:
+                            data_dict["match_content"] = ''
 
-                    if property_hit["inner_hits"]['data_name']['hits']['hits']:
-                        if 'highlight' in property_hit["inner_hits"]['data_name']['hits']['hits'][i]:
-                            data_dict["match_filename"] = property_hit["inner_hits"]['data_name']['hits']['hits'][i]['highlight'].get(
-                                'property.data.name', [''])[0].strip()
+                        if property_hit["inner_hits"]['data_name']['hits']['hits']:
+                            if 'highlight' in property_hit["inner_hits"]['data_name']['hits']['hits'][i]:
+                                data_dict["match_filename"] = property_hit["inner_hits"]['data_name']['hits']['hits'][i]['highlight'].get(
+                                    'property.data.name', [''])[0].strip()
+                            else:
+                                data_dict["match_filename"] = ''
                         else:
                             data_dict["match_filename"] = ''
-                    else:
-                        data_dict["match_filename"] = ''
 
-                    data_dict["created"] = data_hit['_source']['created']
-                    data_dict["filename"] = data_hit['_source']['name']
+                        data_dict["created"] = data_hit['_source']['created']
+                        data_dict["filename"] = data_hit['_source']['name']
 
-                    property_dict['data'].append(data_dict)
+                        property_dict['data'].append(data_dict)
 
-                rows.append(property_dict.copy())
+            rows.append(property_dict.copy())
 
+            # else: 
+            #     for property_hit in hit['inner_hits']['property']['hits']['hits']:
+            #         for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
+            #             data_dict = {}
+            #             data_dict["path"] = check_base_url_exists(
+            #                 data_hit['_source']['url'])
+            #             data_dict["match_count"] = 0
+
+            #             if 'highlight' in data_hit:
+            #                 data_dict["match_content"] = data_hit['highlight'].get(
+            #                     'property.data.content')[0].strip()
+            #                 for content in data_hit['highlight'].get(
+            #                         'property.data.content'):
+            #                     data_dict["match_count"] += int(
+            #                         len(re.findall(r"<em>(.*?)</em>", content)))
+            #             else:
+            #                 data_dict["match_content"] = ''
+
+            #             if property_hit["inner_hits"]['data_name']['hits']['hits']:
+            #                 if 'highlight' in property_hit["inner_hits"]['data_name']['hits']['hits'][i]:
+            #                     data_dict["match_filename"] = property_hit["inner_hits"]['data_name']['hits']['hits'][i]['highlight'].get(
+            #                         'property.data.name', [''])[0].strip()
+            #                 else:
+            #                     data_dict["match_filename"] = ''
+            #             else:
+            #                 data_dict["match_filename"] = ''
+
+            #             data_dict["created"] = data_hit['_source']['created']
+            #             data_dict["filename"] = data_hit['_source']['name']
+            #     rows[[row["node_id"] for row in rows].index]['data'].append()
+        
+        
         scroll_id = result.get("_scroll_id")
 
         try:
