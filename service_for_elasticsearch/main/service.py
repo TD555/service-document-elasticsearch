@@ -1231,88 +1231,56 @@ def search():
         for hit in hits:
             if project_id != hit['_source']['project_id'] or not (hit["_source"]["type_id"] in list_type_id or not list_type_id):
                 continue
-            if hit['_source']['node_id'] not in [row["node_id"] for row in rows]:
-                print(hit['_source']['node_id'])
-                property_dict = {"user_id": hit['_source']['user_id'],
-                                "project_id": hit['_source']['project_id'],
-                                "type_id": hit['_source']['type_id'],
-                                "type_name": hit['_source']['type_name'],
-                                "color": hit['_source']['color'],
-                                "default_image": hit['_source']['default_image'],
-                                "node_id": hit['_source']['node_id'],
-                                "node_name": hit['_source']['node_name']
-                                }
+            property_dict = {"user_id": hit['_source']['user_id'],
+                            "project_id": hit['_source']['project_id'],
+                            "type_id": hit['_source']['type_id'],
+                            "type_name": hit['_source']['type_name'],
+                            "color": hit['_source']['color'],
+                            "default_image": hit['_source']['default_image'],
+                            "node_id": hit['_source']['node_id'],
+                            "node_name": hit['_source']['node_name']
+                            }
+            
+            property_dict['data'] = []
+            for property_hit in hit['inner_hits']['property']['hits']['hits']:
                 
-                property_dict['data'] = []
-                for property_hit in hit['inner_hits']['property']['hits']['hits']:
-                    
-                    property_dict['data_type'] = property_hit['_source']['data_type']
-                    # property_dict['property_id'] = property_hit['_source']['id']
-                    # property_dict['property_name'] = property_hit['_source']['name']
+                property_dict['data_type'] = property_hit['_source']['data_type']
+                # property_dict['property_id'] = property_hit['_source']['id']
+                # property_dict['property_name'] = property_hit['_source']['name']
 
-                    for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
-                        data_dict = {}
-                        data_dict["path"] = check_base_url_exists(
-                            data_hit['_source']['url'])
-                        data_dict["match_count"] = 0
+                for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
+                    data_dict = {}
+                    data_dict["path"] = check_base_url_exists(
+                        data_hit['_source']['url'])
+                    data_dict["match_count"] = 0
 
-                        if 'highlight' in data_hit:
-                            data_dict["match_content"] = data_hit['highlight'].get(
-                                'property.data.content')[0].strip()
-                            for content in data_hit['highlight'].get(
-                                    'property.data.content'):
-                                data_dict["match_count"] += int(
-                                    len(re.findall(r"<em>(.*?)</em>", content)))
-                        else:
-                            data_dict["match_content"] = ''
+                    if 'highlight' in data_hit:
+                        data_dict["match_content"] = data_hit['highlight'].get(
+                            'property.data.content')[0].strip()
+                        for content in data_hit['highlight'].get(
+                                'property.data.content'):
+                            data_dict["match_count"] += int(
+                                len(re.findall(r"<em>(.*?)</em>", content)))
+                    else:
+                        data_dict["match_content"] = ''
 
-                        if property_hit["inner_hits"]['data_name']['hits']['hits']:
-                            if 'highlight' in property_hit["inner_hits"]['data_name']['hits']['hits'][i]:
-                                data_dict["match_filename"] = property_hit["inner_hits"]['data_name']['hits']['hits'][i]['highlight'].get(
-                                    'property.data.name', [''])[0].strip()
-                            else:
-                                data_dict["match_filename"] = ''
+                    if property_hit["inner_hits"]['data_name']['hits']['hits']:
+                        if 'highlight' in property_hit["inner_hits"]['data_name']['hits']['hits'][i]:
+                            data_dict["match_filename"] = property_hit["inner_hits"]['data_name']['hits']['hits'][i]['highlight'].get(
+                                'property.data.name', [''])[0].strip()
                         else:
                             data_dict["match_filename"] = ''
+                    else:
+                        data_dict["match_filename"] = ''
 
-                        data_dict["created"] = data_hit['_source']['created']
-                        data_dict["filename"] = data_hit['_source']['name']
+                    data_dict["created"] = data_hit['_source']['created']
+                    data_dict["filename"] = data_hit['_source']['name']
 
-                        property_dict['data'].append(data_dict)
-
+                    property_dict['data'].append(data_dict)
+                    
+            property_dict['updated'] = max(item['created'] for item in property_dict['data'])
+            
             rows.append(property_dict.copy())
-
-            # else: 
-            #     for property_hit in hit['inner_hits']['property']['hits']['hits']:
-            #         for i, data_hit in enumerate(property_hit["inner_hits"]['data_content']['hits']['hits']):
-            #             data_dict = {}
-            #             data_dict["path"] = check_base_url_exists(
-            #                 data_hit['_source']['url'])
-            #             data_dict["match_count"] = 0
-
-            #             if 'highlight' in data_hit:
-            #                 data_dict["match_content"] = data_hit['highlight'].get(
-            #                     'property.data.content')[0].strip()
-            #                 for content in data_hit['highlight'].get(
-            #                         'property.data.content'):
-            #                     data_dict["match_count"] += int(
-            #                         len(re.findall(r"<em>(.*?)</em>", content)))
-            #             else:
-            #                 data_dict["match_content"] = ''
-
-            #             if property_hit["inner_hits"]['data_name']['hits']['hits']:
-            #                 if 'highlight' in property_hit["inner_hits"]['data_name']['hits']['hits'][i]:
-            #                     data_dict["match_filename"] = property_hit["inner_hits"]['data_name']['hits']['hits'][i]['highlight'].get(
-            #                         'property.data.name', [''])[0].strip()
-            #                 else:
-            #                     data_dict["match_filename"] = ''
-            #             else:
-            #                 data_dict["match_filename"] = ''
-
-            #             data_dict["created"] = data_hit['_source']['created']
-            #             data_dict["filename"] = data_hit['_source']['name']
-            #     rows[[row["node_id"] for row in rows].index]['data'].append()
-        
         
         scroll_id = result.get("_scroll_id")
 
@@ -1326,11 +1294,11 @@ def search():
     if sortOrder == "DESC" and sortField == "name":
         rows.sort(key=lambda x: x["node_name"], reverse=True)
     elif sortOrder == "DESC" and sortField == "updated_at":
-        rows.sort(key=lambda x: x["created"], reverse=True)
+        rows.sort(key=lambda x: x["updated"], reverse=True)
     elif sortOrder == "ASC" and sortField == "name":
         rows.sort(key=lambda x: x["node_name"])
     elif sortOrder == "ASC" and sortField == "updated_at":
-        rows.sort(key=lambda x: x["created"])
+        rows.sort(key=lambda x: x["updated"])
     else:
         abort(403, "Invalid sortOrder and/or sortField value")
 
