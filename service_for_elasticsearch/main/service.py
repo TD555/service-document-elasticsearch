@@ -1627,7 +1627,8 @@ async def get_related_docs(keyword, url):
                             "inner_hits": {
                                 "_source": [
                                     "property.data.url",
-                                    "property.data.name"
+                                    "property.data.name",
+                                    "property.data.created"
                                 ]
                             },
                             "path": "property.data",
@@ -1679,9 +1680,12 @@ async def generate_tags():
         abort(422, "Invalid raw data")
 
     # print(await get_tags(url))
-    if (await get_tags(url))['hits']['hits']:
-        result = (await get_tags(url))['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
-    else: abort(500, "There is no document with tags")
+    get_all_tags = await get_tags(url)
+    if get_all_tags['hits']['hits']:
+        result = get_all_tags['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
+    else:
+        return jsonify({'keywords': [], 'url': url, 'status': 200}) 
+        abort(500, "There is no document with tags")
         
         
     if result:
@@ -1705,35 +1709,40 @@ async def get_similar_docs():
         url = check_base_url_exists(request.json['url'])
     except:
         abort(422, "Invalid raw data")
-
-    result = (await get_tags(url))['hits']['hits']
-    data = []
     
-    all_dict = defaultdict(list)
-    if result:
-        keywords = result[0]['_source']['property'][0]['data'][0]
+    get_all_tags = await get_tags(url)
+    if get_all_tags['hits']['hits']:
+        result = get_all_tags['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
+        
+        data = []
+        
+        all_dict = defaultdict(list)
+        keywords = result[0]['_source']
+
         for i, keyword in enumerate(keywords['keywords']):
-            result = (await get_related_docs(keyword['name'], url))['hits']['hits']
-            for node in result:
+            related_docs = (await get_related_docs(keyword['name'], url))['hits']['hits']
+            for node in related_docs:
                 response_dict = {}
+                node["_source"]['project_type_id'] = node["_source"].pop('type_id')
                 response_dict.update(node["_source"])
                 for property in node['inner_hits']["property"]['hits']['hits']:
                     all_dict[keyword['name']] = [property_data["_source"]['url']
-                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']]
+                                                    for property_data in property['inner_hits']["property.data"]['hits']['hits']]
                     response_dict.update(
                         {"property_" + k: v for k, v in property["_source"].items()})
                     for property_data in property['inner_hits']["property.data"]['hits']['hits']:
+                        property_data["_source"]['document_name'] = property_data["_source"].pop('name')
                         response_dict.update(property_data["_source"])
                         if response_dict not in data:
                             data.append(response_dict.copy())
-            keywords['keywords'][i]['count'] = len(result)
+            keywords['keywords'][i]['count'] = len(related_docs)
         
         all_urls = []
 
         for urls in all_dict.values():
             all_urls.extend(urls)
             
-        return jsonify(**{'all_doc_count': len(set(all_urls))}, **{'data': data}, **{'keywords' : keywords['keywords']}, **{'status': 200})
+        return jsonify(**{'all_doc_count': len(all_urls)}, **{'data': data}, **{'keywords' : keywords['keywords']}, **{'status': 200})
     else:
         return jsonify({'all_doc_count' : 0, 'data': [], 'keywords' : [], 'status': 200})
 
@@ -1752,11 +1761,13 @@ async def expand_tag():
 
     for node in result:
         response_dict = {}
+        node["_source"]['project_type_id'] = node["_source"].pop('type_id')
         response_dict.update(node["_source"])
         for property in node['inner_hits']["property"]['hits']['hits']:
             response_dict.update(
                 {"property_" + k: v for k, v in property["_source"].items()})
             for property_data in property['inner_hits']["property.data"]['hits']['hits']:
+                property_data["_source"]['document_name'] = property_data["_source"].pop('name')
                 response_dict.update(property_data["_source"])
                 data.append(response_dict.copy())
 
