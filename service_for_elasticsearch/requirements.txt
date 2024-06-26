@@ -16,3 +16,7 @@ lemminflect==0.2.3
 psycopg2==2.9.9
 xmltodict==0.13.0
 aiohttp==3.9.5
+langchain==0.2.5
+langchain-community==0.2.5
+langchain_openai==0.1.10
+neo4j==5.21.0

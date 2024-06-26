@@ -23,10 +23,10 @@ def is_elasticsearch_available():
     return False
 
 if __name__ == "__main__":
-    # if is_elasticsearch_available():
+    if is_elasticsearch_available():
         import sys
         sys.path.insert(0, './main')
         from service import app
         
-        # serve(app, port=5000)
-        app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
+        serve(app, port=5000)
+        # app.run(host='0.0.0.0', port=5000, debug=True, threaded=True)
