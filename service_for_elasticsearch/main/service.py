@@ -28,6 +28,7 @@ import io
 from version import __version__, __description__
 
 from keyword_extraction import keyword_extractor
+from chat_with_graph import chat_with_AI
 
 app = Flask(__name__)
 
@@ -244,9 +245,9 @@ async def extract_text_from_xlsx(xlsx_file):
         text = sheet_name + " " + " ".join(row_str).strip()
         clean_text = text.replace("\n", " ")
         clean_text = re.sub(r'\s+', ' ', clean_text)
-        
+
         all_texts.append((text, clean_text))
-        
+
     workbook.close()
     temp_buffer.close()
 
@@ -350,7 +351,7 @@ async def update_docs(newData, oldData, node_id, property_id, property_name, dat
                         propertyExists = true;
                     }
                 }
-                
+
                 // If property does not exist, create it
                 if (!propertyExists) {
                     def newProperty = [
@@ -454,7 +455,7 @@ async def create_or_update():
         default_image = request.json["default_image"]
 
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
     existing_document = es.get(index=ES_INDEX, id=node_id, ignore=404)
 
@@ -524,12 +525,12 @@ async def create_or_update():
     return jsonify({"status": 200, 'message': messages})
 
 
-def update_keywords(items):
+def update_keywords(items, check_keywords=True):
 
     for url, text in items:
 
         es.indices.refresh(index=ES_INDEX)
-        
+
         if text.strip():
             es.update_by_query(
                 index=ES_INDEX,
@@ -549,7 +550,7 @@ def update_keywords(items):
                         "source": "for (int i = 0; i < ctx._source.property.size(); i++) {for (int j = 0; j < ctx._source.property[i].data.size(); j++) {if (ctx._source.property[i].data[j].url == params.path) {def newKeyword = params.keywords ; ctx._source.property[i].data[j].keywords = newKeyword;}}}",
                         "params": {
                             "path": url,
-                            "keywords": keyword_extractor.extract(text)
+                            "keywords": keyword_extractor.extract(text, check_keywords=url.endswith('pdf'))
                         }
                     }
                 }
@@ -634,7 +635,7 @@ async def get_content(item):
     finally:
         if file:
             file.close()
-    
+
     item['url'] = path
     if content:
         item['org_content'] = " ".join([item[0] for item in content])
@@ -650,8 +651,8 @@ async def get_content(item):
 async def update_fields(id_, id_value, fields_dict):
     update_query = {
         "script": {
-            "source": f"""if (ctx._source.{id_} == '{id_value}') 
-                    {{for (int i = 0; i < params.fields_dict.size(); i++) {{ for (entry in params.fields_dict.entrySet()) 
+            "source": f"""if (ctx._source.{id_} == '{id_value}')
+                    {{for (int i = 0; i < params.fields_dict.size(); i++) {{ for (entry in params.fields_dict.entrySet())
                     {{String key = entry.getKey(); String value = entry.getValue(); if (ctx._source.containsKey(key) && ctx._source[key] != value) {{ctx._source[key] = value }}}}}}}}""",
             "lang": "painless",
             "params": {
@@ -675,7 +676,7 @@ async def update_fields(id_, id_value, fields_dict):
 async def update_nested_field(id_value, fields_dict):
     update_query = {
         "script": {
-            "source": f""" for (int i = 0; i < ctx._source.property.size(); i++) {{if (ctx._source.property[i].id == '{id_value}') {{ for (entry in params.fields_dict.entrySet()) 
+            "source": f""" for (int i = 0; i < ctx._source.property.size(); i++) {{if (ctx._source.property[i].id == '{id_value}') {{ for (entry in params.fields_dict.entrySet())
                     {{String key = entry.getKey(); String value = entry.getValue(); if (ctx._source.property[i].containsKey(key) && ctx._source.property[i][key] != value) {{ctx._source.property[i][key] = value }}}}}}}}""",
             "lang": "painless",
             "params": {
@@ -698,7 +699,7 @@ async def update_type():
         color = request.json.get("color")
 
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
     response = await update_fields(id_='type_id', id_value=type_id, fields_dict={"type_name": type_name, "color": color})
 
@@ -720,7 +721,7 @@ async def update_property():
         data_type = request.json.get("data_type")
 
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
     response = await update_nested_field(id_value=property_id, fields_dict={"name": property_name, "data_type": data_type})
 
@@ -742,7 +743,7 @@ async def update_node():
         default_image = request.json.get("default_image")
 
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
     response = await update_fields(id_='node_id', id_value=node_id, fields_dict={"node_name": node_name, "default_image": default_image})
 
@@ -766,7 +767,7 @@ async def delete_node():
         property_id = request.json.get("property_id", None)
 
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
     non_nested_fields = {'project_id': project_id, 'node_id': node_id}
 
@@ -1104,10 +1105,10 @@ def search():
         sortField = request.json["sortField"]
 
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
     if len(keyword.strip()) < 3:
-        abort(422, "Search terms must contain at least 3 characters")
+        abort(400, "Search terms must contain at least 3 characters")
 
     scroll_size = limit  # Number of documents to retrieve in each scroll request
     scroll_timeout = "1m"  # Time interval to keep the search context alive
@@ -1232,18 +1233,18 @@ def search():
             if project_id != hit['_source']['project_id'] or not (hit["_source"]["type_id"] in list_type_id or not list_type_id):
                 continue
             property_dict = {"user_id": hit['_source']['user_id'],
-                            "project_id": hit['_source']['project_id'],
-                            "type_id": hit['_source']['type_id'],
-                            "type_name": hit['_source']['type_name'],
-                            "color": hit['_source']['color'],
-                            "default_image": hit['_source']['default_image'],
-                            "node_id": hit['_source']['node_id'],
-                            "node_name": hit['_source']['node_name']
-                            }
-            
+                             "project_id": hit['_source']['project_id'],
+                             "type_id": hit['_source']['type_id'],
+                             "type_name": hit['_source']['type_name'],
+                             "color": hit['_source']['color'],
+                             "default_image": hit['_source']['default_image'],
+                             "node_id": hit['_source']['node_id'],
+                             "node_name": hit['_source']['node_name']
+                             }
+
             property_dict['data'] = []
             for property_hit in hit['inner_hits']['property']['hits']['hits']:
-                
+
                 property_dict['data_type'] = property_hit['_source']['data_type']
                 # property_dict['property_id'] = property_hit['_source']['id']
                 # property_dict['property_name'] = property_hit['_source']['name']
@@ -1277,11 +1278,12 @@ def search():
                     data_dict["filename"] = data_hit['_source']['name']
 
                     property_dict['data'].append(data_dict)
-                    
-            property_dict['updated'] = max(item['created'] for item in property_dict['data'])
-            
+
+            property_dict['updated'] = max(
+                item['created'] for item in property_dict['data'])
+
             rows.append(property_dict.copy())
-        
+
         scroll_id = result.get("_scroll_id")
 
         try:
@@ -1561,20 +1563,31 @@ async def get__old_list(**search):
 async def get_tags(url, project_id=None, node_id=None, property_id=None):
     query_body = {
         "query": {
-            "nested": {
-                "path": "property.data",
-                "query": {
-                    "bool": {
-                        "must": [
-                            {
-                                "term": {
-                                    "property.data.url": url
-                                }
-                            }
-                        ]
+            "bool": {
+                "must": [
+                    {
+                        "term": {
+                            "project_id.keyword": project_id
+                        }
+                    },
+                    {
+                        "nested": {
+                            "path": "property.data",
+                            "query": {
+                                    "bool": {
+                                        "must": [
+                                            {
+                                                "term": {
+                                                    "property.data.url": url
+                                                }
+                                            }
+                                        ]
+                                    }
+                            },
+                            "inner_hits": {"_source": ["property.data.keywords"]}
+                        }
                     }
-                },
-                "inner_hits": {"_source": ["property.data.keywords"]}
+                ]
             }
         }
     }
@@ -1605,7 +1618,7 @@ async def get_tags(url, project_id=None, node_id=None, property_id=None):
     return response
 
 
-async def get_related_docs(keyword, url):
+async def get_related_docs(keyword, url, project_id):
     return es.search(
         index=ES_INDEX,
         body={
@@ -1613,149 +1626,162 @@ async def get_related_docs(keyword, url):
                 "includes": ["user_id", "project_id", "color", "type_id", "type_name", "node_id", "node_name", "default_image"]
             },
             "query": {
-                "nested": {
-                    "inner_hits": {
-                        "_source": [
-                            "property.id",
-                            "property.name",
-                            "property.data_type"
-                        ]
-                    },
-                    "path": "property",
-                    "query": {
-                        "nested": {
-                            "inner_hits": {
-                                "_source": [
-                                    "property.data.url",
-                                    "property.data.name",
-                                    "property.data.created"
-                                ]
-                            },
-                            "path": "property.data",
-                            "query": {
-                                "bool": {
-                                    "must": [
-                                        {
-                                            "nested": {
-                                                "path": "property.data.keywords",
-                                                "query": {
-                                                    "bool": {
-                                                        "must": [
-                                                            {
-                                                                "term": {
-                                                                    "property.data.keywords.name": keyword
+                "bool": {
+                    "must": [
+                        {
+                            "term": {
+                                "project_id.keyword": project_id
+                            }
+                        },
+                        {
+                            "nested": {
+                                "inner_hits": {
+                                    "_source": [
+                                        "property.id",
+                                        "property.name",
+                                        "property.data_type"
+                                    ]
+                                },
+                                "path": "property",
+                                "query": {
+                                    "nested": {
+                                        "inner_hits": {
+                                            "_source": [
+                                                "property.data.url",
+                                                "property.data.name",
+                                                "property.data.created"
+                                            ]
+                                        },
+                                        "path": "property.data",
+                                        "query": {
+                                            "bool": {
+                                                "must": [
+                                                    {
+                                                        "nested": {
+                                                            "path": "property.data.keywords",
+                                                            "query": {
+                                                                "bool": {
+                                                                    "must": [
+                                                                        {
+                                                                            "term": {
+                                                                                "property.data.keywords.name": keyword
+                                                                            }
+                                                                        }
+                                                                    ]
                                                                 }
                                                             }
-                                                        ]
+                                                        }
                                                     }
-                                                }
+                                                ],
+                                                "must_not": [
+                                                    {
+                                                        "term": {
+                                                            "property.data.url": url
+                                                        }
+                                                    }
+                                                ]
                                             }
                                         }
-                                    ],
-                                    "must_not": [
-                                        {
-                                            "term": {
-                                                "property.data.url": url
-                                            }
-                                        }
-                                    ]
+                                    }
                                 }
                             }
                         }
-                    }
+                    ]
                 }
             }
         }
     )
 
 
-@app.route('/generate_tags', methods=["POST"])
+@ app.route('/generate_tags', methods=["POST"])
 async def generate_tags():
     try:
-        # project_id = request.json['project_id']
+        project_id = request.json['project_id']
         # node_id = request.json['node_id']
         # property_id = request.json['property_id']
         url = check_base_url_exists(request.json['url'])
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
     # print(await get_tags(url))
-    get_all_tags = await get_tags(url)
+    get_all_tags = await get_tags(url, project_id)
     if get_all_tags['hits']['hits']:
         result = get_all_tags['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
     else:
-        return jsonify({'keywords': [], 'url': url, 'status': 200}) 
+        return jsonify({'keywords': [], 'url': url, 'status': 200})
         abort(500, "There is no document with tags")
-        
-        
+
     if result:
         keywords = result[0]['_source']
         for i, keyword in enumerate(keywords['keywords']):
-            result = (await get_related_docs(keyword['name'], url))['hits']['hits']
+            result = (await get_related_docs(keyword['name'], url, project_id))['hits']['hits']
             keywords['keywords'][i]['count'] = len(result)
-
 
         return jsonify(**keywords,  **{'url': url}, **{'status': 200})
     else:
         return jsonify({'keywords': [], 'url': url, 'status': 200})
 
 
-@app.route('/similar_docs', methods=["POST"])
+@ app.route('/similar_docs', methods=["POST"])
 async def get_similar_docs():
     try:
-        # project_id = request.json['project_id']
+        project_id = request.json['project_id']
         # node_id = request.json['node_id']
         # property_id = request.json['property_id']
         url = check_base_url_exists(request.json['url'])
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
+
+    get_all_tags = await get_tags(url, project_id)
     
-    get_all_tags = await get_tags(url)
     if get_all_tags['hits']['hits']:
         result = get_all_tags['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
-        
+
         data = []
-        
+
         all_dict = defaultdict(list)
         keywords = result[0]['_source']
 
         for i, keyword in enumerate(keywords['keywords']):
-            related_docs = (await get_related_docs(keyword['name'], url))['hits']['hits']
+            related_docs = (await get_related_docs(keyword['name'], url, project_id))['hits']['hits']
             for node in related_docs:
                 response_dict = {}
-                node["_source"]['project_type_id'] = node["_source"].pop('type_id')
+                node["_source"]['project_type_id'] = node["_source"].pop(
+                    'type_id')
                 response_dict.update(node["_source"])
                 for property in node['inner_hits']["property"]['hits']['hits']:
-                    all_dict[keyword['name']] = [property_data["_source"]['url']
-                                                    for property_data in property['inner_hits']["property.data"]['hits']['hits']]
+                    all_dict[keyword['name']].extend([property_data["_source"]['url']
+                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']])
                     response_dict.update(
                         {"property_" + k: v for k, v in property["_source"].items()})
                     for property_data in property['inner_hits']["property.data"]['hits']['hits']:
-                        property_data["_source"]['document_name'] = property_data["_source"].pop('name')
+                        property_data["_source"]['document_name'] = property_data["_source"].pop(
+                            'name')
                         response_dict.update(property_data["_source"])
                         if response_dict not in data:
                             data.append(response_dict.copy())
             keywords['keywords'][i]['count'] = len(related_docs)
-        
+
         all_urls = []
 
         for urls in all_dict.values():
             all_urls.extend(urls)
-            
-        return jsonify(**{'all_doc_count': len(all_urls)}, **{'data': data}, **{'keywords' : keywords['keywords']}, **{'status': 200})
+
+        return jsonify(**{'all_doc_count': len(all_urls)}, **{'data': data}, **{'keywords': keywords['keywords']}, **{'status': 200})
     else:
-        return jsonify({'all_doc_count' : 0, 'data': [], 'keywords' : [], 'status': 200})
+        return jsonify({'all_doc_count': 0, 'data': [], 'keywords': [], 'status': 200})
 
 
-@app.route('/expand_tag', methods=["POST"])
+@ app.route('/expand_tag', methods=["POST"])
 async def expand_tag():
     try:
+        project_id = request.json['project_id']
         keyword = request.json['keyword']
         url = check_base_url_exists(request.json['url'])
     except:
-        abort(422, "Invalid raw data")
+        abort(400, "Invalid raw data")
 
-    result = (await get_related_docs(keyword, url))['hits']['hits']
+    result = (await get_related_docs(keyword, url, project_id))['hits']['hits']
 
     data = []
 
@@ -1767,7 +1793,8 @@ async def expand_tag():
             response_dict.update(
                 {"property_" + k: v for k, v in property["_source"].items()})
             for property_data in property['inner_hits']["property.data"]['hits']['hits']:
-                property_data["_source"]['document_name'] = property_data["_source"].pop('name')
+                property_data["_source"]['document_name'] = property_data["_source"].pop(
+                    'name')
                 response_dict.update(property_data["_source"])
                 data.append(response_dict.copy())
 
@@ -1796,8 +1823,9 @@ def convert_to_text(item, abstract=False):
     if isinstance(item, dict):
         return item.get("#text", "")
     if abstract and isinstance(item, list):
-        text = '\n\n'.join([element["@Label"] + '\n' + element["#text"] for element in item])
-        return text  
+        text = '\n\n'.join([element["@Label"] + '\n' +
+                           element["#text"] for element in item])
+        return text
     return item
 
 
@@ -1809,8 +1837,9 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
                 xml_file = await response.text()
                 xml_data = ET.fromstring(xml_file)
                 xmlstr = ET.tostring(xml_data, encoding='utf-8', method='xml')
-                dict_data = dict(xmltodict.parse(xmlstr))['PubmedArticleSet']['PubmedArticle']['MedlineCitation']
-                
+                dict_data = dict(xmltodict.parse(xmlstr))[
+                    'PubmedArticleSet']['PubmedArticle']['MedlineCitation']
+
                 title = convert_to_text(dict_data['Article']['ArticleTitle'])
                 id_data = {
                     'article': {
@@ -1828,13 +1857,16 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
 
                 elocation = dict_data['Article'].get('ELocationID')
                 if isinstance(elocation, dict) and elocation.get('@EIdType') == 'doi':
-                    id_data['article']['article_url'] = 'https://www.doi.org/' + elocation.get('#text', '')
+                    id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                        elocation.get('#text', '')
                 elif isinstance(elocation, list):
                     for eid in elocation:
                         if eid.get('@EIdType') == 'doi':
-                            id_data['article']['article_url'] = 'https://www.doi.org/' + eid.get('#text', '')
+                            id_data['article']['article_url'] = 'https://www.doi.org/' + \
+                                eid.get('#text', '')
 
-                authors = dict_data['Article'].get('AuthorList', {'Author': []})['Author']
+                authors = dict_data['Article'].get(
+                    'AuthorList', {'Author': []})['Author']
                 if isinstance(authors, list):
                     authors = authors[:20]
                 else:
@@ -1854,11 +1886,12 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
                     }
                     for author in authors if (author.get('ForeName', '') + ' ' + author.get('LastName', '')).strip()
                 ]
-                
+
                 keywords = dict_data.get('KeywordList', {}).get('Keyword', [])
                 if not isinstance(keywords, list):
                     keywords = [keywords]
-                id_data['keywords'] = [keyword.get("#text", "") for keyword in keywords] if keywords else []
+                id_data['keywords'] = [keyword.get(
+                    "#text", "") for keyword in keywords] if keywords else []
 
                 return id_data
 
@@ -1873,6 +1906,7 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
             print(f"Error processing ID {id}: {e}")
             break
             abort(500, f"Error processing ID {id}: {e}")
+
 
 async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
@@ -1891,24 +1925,26 @@ async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, 
             print(f"Error processing keyword {keyword}: {e}")
             abort(500, f"Error processing keyword {keyword}: {e}")
 
-@app.route('/pubmed/get_data', methods=["POST"])
+
+@ app.route('/pubmed/get_data', methods=["POST"])
 async def pubmed_preview():
     try:
         keyword = str(request.json['keyword'])
         limit = request.json.get('limit', 5)
         page = int(request.json.get('page', 1))
     except Exception as e:
-        abort(422, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
-        
+        abort(
+            400, f"Invalid raw data. One of the parameters is incorrect. {str(e)}")
+
     if len(keyword) < 3:
         abort(400, "Keyword must be at least 3 characters long")
-    
+
     try:
         async with aiohttp.ClientSession() as session:
             search_result = await asyncio.wait_for(search_with_retry(session, keyword, limit, (page-1)*limit), timeout=10)
             id_list = search_result['esearchresult']['idlist']
             await asyncio.sleep(0.1)
-            
+
             tasks = [fetch_with_retry(session, id) for id in id_list]
             all_data = await asyncio.gather(*[asyncio.wait_for(task, timeout=20) for task in tasks])
 
@@ -1917,7 +1953,6 @@ async def pubmed_preview():
         return jsonify({'count': search_result['esearchresult']['count'], 'articles': all_data})
     except asyncio.TimeoutError:
         abort(500, "The request timed out. Please try again later.")
-
 
 
 get_all_query = """SELECT np.user_id, np.project_id, n.project_type_id as type_id, pnt.name as type_name, pnt.color as color, np.node_id, n.name as node_name, n.default_image, np.project_type_property_id as property_id, pntp.name as property_name, 'doc' AS type, np.nodes_data, np.created_at as created
@@ -1931,7 +1966,7 @@ ON np.project_type_property_id = pntp.id
 WHERE project_type_property_type='document' and nodes_data not in ('[]', '[{}]');"""
 
 
-@app.route("/migrate", methods=["GET"])
+@ app.route("/migrate", methods=["GET"])
 async def migration():
 
     conn = ps.connect(dbname=DATABASE_NAME, user=DATABASE_USER,
@@ -2036,7 +2071,7 @@ async def migration():
                                  new_index_list[i]['property'][j]['data'][k]['content']))
 
         thread = threading.Thread(target=update_keywords, kwargs={
-            'items': [item for item in [item_ for item_ in items if item_[1]]]})
+            'items': [item for item in [item_ for item_ in items if item_[1]]], 'check_keywords' : False})
 
         thread.start()
 
@@ -2044,3 +2079,16 @@ async def migration():
 
     except Exception as e:
         abort(500, str(e))
+
+
+#   AI tools
+
+@ app.route('/chat', methods=['POST'])
+async def chat():
+    user_input = request.json.get("message")
+    project_id = request.json.get("project_id")
+    if not user_input:
+        abort(400, "Invalid raw data. No message provided")
+
+    response = await chat_with_AI.get_bot_response(user_input, project_id)
+    return jsonify({"response": response})

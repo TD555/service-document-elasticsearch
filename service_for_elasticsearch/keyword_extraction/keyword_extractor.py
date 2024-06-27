@@ -60,7 +60,7 @@ def is_noun(token, lang='en'):
         return 'NOUN' in token.tag_ 
 
 
-def extract(doc_text):
+def extract(doc_text, check_keywords=True):
     compound_nouns = defaultdict(int)
     list_of_counters = {'tokens' : defaultdict(int), 'compounds' : []}
     list_of_counters['tokens'] = defaultdict(int)
@@ -78,18 +78,21 @@ def extract(doc_text):
             spacy_nlp.max_length = len(decontracted_text)
             doc = spacy_nlp(decontracted_text)
             lang = 'en'
-            match = re.search(keywords_pattern_en, doc_text)
-            if match and match.group(1) is not None:
-                if ',' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(',')[:] if key.strip().title()]
-                elif ';' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(';')[:] if key.strip().title()]
-                elif '·' in match.group(1):
-                    all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split('·')[:] if key.strip().title()]
+            if check_keywords:
+                match = re.search(keywords_pattern_en, doc_text)
+                if match and match.group(1) is not None:
+                    if ',' in match.group(1):
+                        all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(',')[:] if key.strip().title()]
+                    elif ';' in match.group(1):
+                        all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split(';')[:] if key.strip().title()]
+                    elif '·' in match.group(1):
+                        all_keys = [{'name' : key.strip().title(), 'score' : 10.0 } for key in match.group(1).split('·')[:] if key.strip().title()]
+                    else: 
+                        all_keys = []
                 else: 
                     all_keys = []
-            else: 
-                all_keys = []
+            
+            else: all_keys = []
                 
     except Exception as e: 
         # spacy_nlp.max_length = len(decontracted_text)
