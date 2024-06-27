@@ -4,6 +4,8 @@ from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import os
 import re
+from dotenv import load_dotenv
+load_dotenv()
 
 cypher_generation_template = """
 You are an expert Neo4j Cypher translator who converts English to Cypher based on the Neo4j Schema provided, following the instructions below:
@@ -80,25 +82,12 @@ qa_prompt = PromptTemplate(
     input_variables=["context", "question"], template=CYPHER_QA_TEMPLATE
 )
 
-# os.environ['OPENAI_API_KEY'] = "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"
-# url = "neo4j+ssc://55332915.databases.neo4j.io"
-# username = "neo4j"
-# password = "e1taG4oPfcGO0Grf-BdQ_7AC8_4NvM_npshHN2jP3zE"
-
-url = os.environ['NEO4J_URL']
-username = os.environ['NEO4J_USERNAME']
-password = os.environ['NEO4J_PASSWORD']
-database = os.environ['NEO4J_DEFAULT_DB']
+print(os.environ['NEO4J_URI'])
 
 try:
-    graph = Neo4jGraph(
-        url=url, 
-        username=username, 
-        password=password,
-        database=database
-    )
+    graph = Neo4jGraph()
+    
     graph.refresh_schema()
-
         
 
     cypher_chain = GraphCypherQAChain.from_llm(
@@ -110,7 +99,7 @@ try:
         qa_prompt=qa_prompt
     )
 
-except: raise ValueError(f'Cannot resolve address {url}')
+except Exception as e: raise ValueError(str(e))
 
 async def get_bot_response(message, project_id):
     try:
