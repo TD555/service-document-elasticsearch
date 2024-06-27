@@ -2089,12 +2089,15 @@ async def migration():
 @ app.route('/chat', methods=['POST'])
 async def chat():
     
-    user_input = request.json.get("message")
-    project_id = request.json.get("project_id")
+    user_input:str = request.json.get("message")
+    project_id:str = request.json.get("project_id")
+    
+    if user_input.lower().strip() in ['hi', 'hello', 'hey']:
+        return jsonify({"response": 'Hi, how can I help with getting information about your graph?'})
     if not user_input:
         abort(400, "Invalid raw data. No message provided")
 
     try:
         response = await chat_with_AI.get_bot_response(user_input, project_id)
         return jsonify({"response": response})
-    except Exception as e: abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4J_URL"]}'))
+    except Exception as e: abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4J_URI"]}'))
