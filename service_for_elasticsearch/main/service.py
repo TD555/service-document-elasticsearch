@@ -28,7 +28,10 @@ import io
 from version import __version__, __description__
 
 from keyword_extraction import keyword_extractor
-from chat_with_graph import chat_with_AI
+try:
+    from chat_with_graph import chat_with_AI
+except Exception as e:
+    print(str(e))
 
 app = Flask(__name__)
 
@@ -2085,10 +2088,13 @@ async def migration():
 
 @ app.route('/chat', methods=['POST'])
 async def chat():
+    
     user_input = request.json.get("message")
     project_id = request.json.get("project_id")
     if not user_input:
         abort(400, "Invalid raw data. No message provided")
 
-    response = await chat_with_AI.get_bot_response(user_input, project_id)
-    return jsonify({"response": response})
+    try:
+        response = await chat_with_AI.get_bot_response(user_input, project_id)
+        return jsonify({"response": response})
+    except Exception as e: abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4J_URL"]}'))

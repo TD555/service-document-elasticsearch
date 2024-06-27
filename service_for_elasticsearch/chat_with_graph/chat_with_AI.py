@@ -74,7 +74,7 @@ Information:
 {context}
 
 Question: {question}
-Helpful Answer:"""
+"""
 
 qa_prompt = PromptTemplate(
     input_variables=["context", "question"], template=CYPHER_QA_TEMPLATE
@@ -88,29 +88,35 @@ qa_prompt = PromptTemplate(
 url = os.environ['NEO4J_URL']
 username = os.environ['NEO4J_USERNAME']
 password = os.environ['NEO4J_PASSWORD']
+database = os.environ['NEO4J_DEFAULT_DB']
 
-graph = Neo4jGraph(
-    url=url, 
-    username=username, 
-    password=password
-)
+try:
+    graph = Neo4jGraph(
+        url=url, 
+        username=username, 
+        password=password,
+        database=database
+    )
+    graph.refresh_schema()
 
-graph.refresh_schema()
+        
 
-cypher_chain = GraphCypherQAChain.from_llm(
-    llm=ChatOpenAI(temperature=0, model_name='gpt-4'), # type: ignore
-    graph=graph,
-    verbose=True,
-    return_intermediate_steps=True,
-    cypher_prompt=cypher_prompt,
-    qa_prompt=qa_prompt
-)
+    cypher_chain = GraphCypherQAChain.from_llm(
+        llm=ChatOpenAI(temperature=0, model_name='gpt-4'), # type: ignore
+        graph=graph,
+        verbose=True,
+        return_intermediate_steps=False,
+        cypher_prompt=cypher_prompt,
+        qa_prompt=qa_prompt
+    )
+
+except: raise ValueError(f'Cannot resolve address {url}')
 
 async def get_bot_response(message, project_id):
     try:
         message = cypher_chain(message + f" (project_id : {project_id})")
     except Exception as e:
         try:
-            message = {"result" : re.search("\"Answer: (.*)\"", str(e)).group(1)}
+            message = {"result" : re.search("\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
         except: message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
     return message["result"]
