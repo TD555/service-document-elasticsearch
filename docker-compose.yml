@@ -49,7 +49,7 @@ services:
       DB_PASSWORD: ${DB_PASSWORD}
       DB_PORT: ${DB_PORT}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      NEO4JURL: bolt://neo4j-container:7687
+      NEO4JURL: ${NEO4JURL}
       NEO4JUSER: ${NEO4JUSER}
       NEO4JPASSWORD: ${NEO4JPASSWORD}
     restart: always
