@@ -31,7 +31,7 @@ from keyword_extraction import keyword_extractor
 try:
     from chat_with_graph import chat_with_AI
 except Exception as e:
-    print(str(e))
+    ERROR_MESSAGE = str(e)
 
 app = Flask(__name__)
 
@@ -2100,4 +2100,7 @@ async def chat():
     try:
         response = await chat_with_AI.get_bot_response(user_input, project_id)
         return jsonify({"response": response})
-    except Exception as e: abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4JURL"]}'))
+    except Exception as e: 
+        if 'ERROR_MESSAGE' in globals():
+            abort(503, ValueError(ERROR_MESSAGE))
+        abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4JURL"]}'))
