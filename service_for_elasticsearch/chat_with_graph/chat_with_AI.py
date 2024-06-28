@@ -5,8 +5,11 @@ from langchain_core.prompts import PromptTemplate
 import os
 import re
 from dotenv import load_dotenv
+
+# Load environment variables
 load_dotenv()
 
+# Define the cypher generation template
 cypher_generation_template = """
 You are an expert Neo4j Cypher translator who converts English to Cypher based on the Neo4j Schema provided, following the instructions below:
 1. Generate Cypher query compatible ONLY for Neo4j Version 5
@@ -53,11 +56,13 @@ ORDER BY NumberOfTechnologies DESC```
 Question: {question}
 """
 
+# Define the PromptTemplate for Cypher generation
 cypher_prompt = PromptTemplate(
-    template = cypher_generation_template,
-    input_variables = ["schema", "question"]
+    template=cypher_generation_template,
+    input_variables=["schema", "question"]
 )
 
+# Define the QA Template
 CYPHER_QA_TEMPLATE = """You are an assistant that helps to form nice and human understandable answers.
 The questions will be asked through the AI chat of the Araks system, during which you have to answer the questions asked by the user.
 Answers must be specific to the graph with project_id only.
@@ -78,18 +83,25 @@ Information:
 Question: {question}
 """
 
+# Define the PromptTemplate for QA
 qa_prompt = PromptTemplate(
     input_variables=["context", "question"], template=CYPHER_QA_TEMPLATE
 )
 
-print(os.environ['OPENAI_API_KEY'])
+# Print the OPENAI_API_KEY to ensure it's loaded
+print(os.getenv('OPENAI_API_KEY'))
 
 try:
-    graph = Neo4jGraph(url = os.environ['NEO4JURL'], username=os.environ['NEO4JUSER'], password=os.environ['NEO4JPASSWORD'])
+    # Initialize Neo4jGraph
+    graph = Neo4jGraph(
+        url=os.getenv('NEO4JURL'), 
+        username=os.getenv('NEO4JUSER'), 
+        password=os.getenv('NEO4JPASSWORD')
+    )
     
     graph.refresh_schema()
-        
 
+    # Initialize GraphCypherQAChain
     cypher_chain = GraphCypherQAChain.from_llm(
         llm=ChatOpenAI(temperature=0, model_name='gpt-4'), # type: ignore
         graph=graph,
@@ -99,7 +111,8 @@ try:
         qa_prompt=qa_prompt
     )
 
-except Exception as e: raise ValueError(str(e))
+except Exception as e:
+    raise ValueError(str(e))
 
 async def get_bot_response(message, project_id):
     try:
@@ -107,7 +120,7 @@ async def get_bot_response(message, project_id):
     except Exception as e:
         print(str(e))
         try:
-            message = {"result" : re.search("\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
+            message = {"result": re.search(r"\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
         except Exception as e: 
-            message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
+            message = {"result": "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
     return message["result"]
