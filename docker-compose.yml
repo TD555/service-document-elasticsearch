@@ -49,11 +49,9 @@ services:
       DB_PASSWORD : ${DB_PASSWORD}
       DB_PORT : ${DB_PORT}
       OPENAI_API_KEY : ${OPENAI_API_KEY}
-      NEO4J_URI : ${NEO4J_URI}
-      NEO4J_USERNAME : ${NEO4J_USERNAME}
-      NEO4J_PASSWORD : ${NEO4J_PASSWORD}
-      NEO4J_DATABASE : ${NEO4J_DATABASE}
+      NEO4JURL : ${NEO4JURL}
+      NEO4JUSER : ${NEO4JUSER}
+      NEO4JPASSWORD : ${NEO4JPASSWORD}
     restart: always
-
 volumes:
   elasticsearch_data:
