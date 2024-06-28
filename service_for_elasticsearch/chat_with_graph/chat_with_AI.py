@@ -3,7 +3,6 @@ from langchain_community.graphs import Neo4jGraph
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import os
-import re
 from dotenv import load_dotenv
 
 # Load environment variables
@@ -76,61 +75,53 @@ The response should not specify which project ID it is referring to and it is no
 In case of a question about specific nodes, give answers about specific nodes.
 All graphs are located in Araks, which is a web-graph service that works with graphs, you can mention about Araks sometimes in your response.
 Answers must be formulated taking into account the limits of the model (4096 tokens).
-In case of a question about a particular node or connection, try to give all the information about it, taking into account its properties and connections.
-Information:
-{context}
-
+In case of a question about a particular node or connection, try to give all the information about it, taking into account the limits of the model (4096 tokens).
 Question: {question}
-"""
+Cypher Query Result: {result}
+Answer: """
 
-# Define the PromptTemplate for QA
 qa_prompt = PromptTemplate(
-    input_variables=["context", "question"], template=CYPHER_QA_TEMPLATE
+    template=CYPHER_QA_TEMPLATE,
+    input_variables=["question", "result"]
 )
 
-# Print the OPENAI_API_KEY to ensure it's loaded
-print("OpenAI API Key:", os.getenv('OPENAI_API_KEY'))
+# Create the ChatOpenAI instance with the OpenAI API key from environment variables
+openai_llm = ChatOpenAI(
+    temperature=0,
+    openai_api_key=os.getenv("OPENAI_API_KEY")
+)
 
-# Fetch and print Neo4j connection details to debug
-neo4j_url = os.getenv('NEO4JURL')
-neo4j_user = os.getenv('NEO4JUSER')
-neo4j_password = os.getenv('NEO4JPASSWORD')
+# Define the Neo4j connection parameters from environment variables
+neo4j_url = os.getenv("NEO4JURL")
+neo4j_username = os.getenv("NEO4JUSER")
+neo4j_password = os.getenv("NEO4JPASSWORD")
 
-print("Neo4j URL:", neo4j_url)
-print("Neo4j User:", neo4j_user)
-# Avoid printing the password for security reasons
+# Example schema, replace this with your actual schema
+example_schema = """
+Node labels: Person, Project, Client, Technology
+Relationship types: HAS_CLIENT, HAS_PEOPLE, USES_TECH
+"""
 
-try:
-    # Initialize Neo4jGraph
-    graph = Neo4jGraph(
-        url=neo4j_url, 
-        username=neo4j_user, 
-        password=neo4j_password
-    )
-    
-    graph.refresh_schema()
+# Initialize the Neo4jGraph with connection details
+graph = Neo4jGraph(
+    url=neo4j_url,
+    username=neo4j_username,
+    password=neo4j_password
+)
 
-    # Initialize GraphCypherQAChain
-    cypher_chain = GraphCypherQAChain.from_llm(
-        llm=ChatOpenAI(temperature=0, model_name='gpt-4'), # type: ignore
-        graph=graph,
-        verbose=True,
-        return_intermediate_steps=False,
-        cypher_prompt=cypher_prompt,
-        qa_prompt=qa_prompt
-    )
+# Create the GraphCypherQAChain with the initialized components
+qa_chain = GraphCypherQAChain.from_llm(
+    graph=graph,
+    cypher_prompt=cypher_prompt,
+    qa_prompt=qa_prompt,
+    llm=openai_llm
+)
 
-except Exception as e:
-    raise ValueError("Error initializing GraphCypherQAChain: " + str(e))
+# Example question, replace this with your actual question
+question = "Tell me about a person named 'Marie Curie'?"
 
-async def get_bot_response(message, project_id):
-    try:
-        response = cypher_chain(message + f" (project_id : {project_id})")
-    except Exception as e:
-        print("Error during Cypher query generation:", str(e))
-        try:
-            response = {"result": re.search(r"\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
-        except Exception as nested_e:
-            print("Error during response extraction:", str(nested_e))
-            response = {"result": "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
-    return response["result"]
+# Run the QA chain with the example schema and question
+response = qa_chain.run(schema=example_schema, question=question)
+
+# Print the response
+print(response)

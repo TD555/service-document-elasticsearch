@@ -12,14 +12,14 @@ services:
       - node.name=elasticsearch1
       - xpack.security.enabled=false
       - bootstrap.memory_lock=true
-      - index.refresh_interval = 5s
-      - index.number_of_replicas = 1
-      - index.translog.flush_threshold_ops = 50000
-      - index.translog.flush_threshold_size = 1.5gb
-      - indices.store.throttle.max_bytes_per_sec = 20mb
-      - search.max_open_scroll_context = 500
-      - cluster.routing.allocation.disk.watermark.low = 85%
-      - cluster.routing.allocation.disk.watermark.high = 90%
+      - index.refresh_interval=5s
+      - index.number_of_replicas=1
+      - index.translog.flush_threshold_ops=50000
+      - index.translog.flush_threshold_size=1.5gb
+      - indices.store.throttle.max_bytes_per_sec=20mb
+      - search.max_open_scroll_context=500
+      - cluster.routing.allocation.disk.watermark.low=85%
+      - cluster.routing.allocation.disk.watermark.high=90%
       - discovery.seed_hosts=[]
       - path.data=/usr/share/elasticsearch/data
     ulimits:
@@ -28,9 +28,11 @@ services:
         hard: -1
     volumes:
       - elasticsearch_data:/usr/share/elasticsearch/data
-    
+    networks:
+      - shared_network
+
   flask_elastic_app:
-    build: 
+    build:
       context: ./service_for_elasticsearch
     depends_on:
       - elasticsearch
@@ -43,15 +45,22 @@ services:
       ELASTICSEARCH_INDEX: ${ELASTICSEARCH_INDEX}
       ELASTICSEARCH_NEW_INDEX: ${ELASTICSEARCH_NEW_INDEX}
       AMAZON_URL: ${AMAZON_URL}
-      DB_NAME : ${DB_NAME}
-      DB_USER : ${DB_USER} 
-      DB_HOST : ${DB_HOST}
-      DB_PASSWORD : ${DB_PASSWORD}
-      DB_PORT : ${DB_PORT}
-      OPENAI_API_KEY : ${OPENAI_API_KEY}
-      NEO4JURL : ${NEO4JURL}
-      NEO4JUSER : ${NEO4JUSER}
-      NEO4JPASSWORD : ${NEO4JPASSWORD}
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_HOST: ${DB_HOST}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_PORT: ${DB_PORT}
+      OPENAI_API_KEY: ${OPENAI_API_KEY}
+      NEO4JURL: bolt://neo4j-container:7687
+      NEO4JUSER: ${NEO4JUSER}
+      NEO4JPASSWORD: ${NEO4JPASSWORD}
     restart: always
+    networks:
+      - shared_network
+
 volumes:
   elasticsearch_data:
+
+networks:
+  shared_network:
+    external: true
