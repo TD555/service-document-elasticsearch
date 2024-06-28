@@ -89,14 +89,23 @@ qa_prompt = PromptTemplate(
 )
 
 # Print the OPENAI_API_KEY to ensure it's loaded
-print(os.getenv('OPENAI_API_KEY'))
+print("OpenAI API Key:", os.getenv('OPENAI_API_KEY'))
+
+# Fetch and print Neo4j connection details to debug
+neo4j_url = os.getenv('NEO4JURL')
+neo4j_user = os.getenv('NEO4JUSER')
+neo4j_password = os.getenv('NEO4JPASSWORD')
+
+print("Neo4j URL:", neo4j_url)
+print("Neo4j User:", neo4j_user)
+# Avoid printing the password for security reasons
 
 try:
     # Initialize Neo4jGraph
     graph = Neo4jGraph(
-        url=os.getenv('NEO4JURL'), 
-        username=os.getenv('NEO4JUSER'), 
-        password=os.getenv('NEO4JPASSWORD')
+        url=neo4j_url, 
+        username=neo4j_user, 
+        password=neo4j_password
     )
     
     graph.refresh_schema()
@@ -112,15 +121,16 @@ try:
     )
 
 except Exception as e:
-    raise ValueError(str(e))
+    raise ValueError("Error initializing GraphCypherQAChain: " + str(e))
 
 async def get_bot_response(message, project_id):
     try:
-        message = cypher_chain(message + f" (project_id : {project_id})")
+        response = cypher_chain(message + f" (project_id : {project_id})")
     except Exception as e:
-        print(str(e))
+        print("Error during Cypher query generation:", str(e))
         try:
-            message = {"result": re.search(r"\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
-        except Exception as e: 
-            message = {"result": "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
-    return message["result"]
+            response = {"result": re.search(r"\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
+        except Exception as nested_e:
+            print("Error during response extraction:", str(nested_e))
+            response = {"result": "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
+    return response["result"]
