@@ -91,7 +91,7 @@ try:
         
 
     cypher_chain = GraphCypherQAChain.from_llm(
-        llm=ChatOpenAI(temperature=0, model_name='gpt-4'), # type: ignore
+        llm=ChatOpenAI(temperature=0, model_name='gpt-4', max_tokens = 8192), # type: ignore
         graph=graph,
         verbose=True,
         return_intermediate_steps=False,
