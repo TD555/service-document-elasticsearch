@@ -117,7 +117,12 @@ def truncate_input(input_text, max_length):
 
 async def get_bot_response(message, project_id):
     try:
-        message = cypher_chain(message + f" (project_id : {project_id})")
+        full_message = f"{message} (project_id: {project_id})"
+        
+        # Truncate the full_message if necessary
+        truncated_message = truncate_input(full_message, MAX_INPUT_TOKENS)
+        
+        message = cypher_chain(truncated_message)
     except Exception as e:
         print(str(e))
         try:
