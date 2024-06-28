@@ -52,13 +52,8 @@ services:
       NEO4JURL: bolt://neo4j-container:7687
       NEO4JUSER: ${NEO4JUSER}
       NEO4JPASSWORD: ${NEO4JPASSWORD}
-    restart: always
-    networks:
-      - shared_network
+    restart: always 
 
 volumes:
   elasticsearch_data:
-
-networks:
-  shared_network:
-    external: true
+ 
