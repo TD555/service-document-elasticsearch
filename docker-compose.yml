@@ -57,7 +57,4 @@ services:
 
 volumes:
   elasticsearch_data:
-
-networks:
-  shared_network:
-    external: true
+ 
