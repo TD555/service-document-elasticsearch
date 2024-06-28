@@ -7,15 +7,21 @@ import re
 from dotenv import load_dotenv
 load_dotenv()
 
+# Define maximum token length
+MAX_INPUT_TOKENS = 5000  # Set a reasonable limit for input tokens
+MAX_OUTPUT_TOKENS = 2000  # Reduce output tokens to fit within the overall limit
+
+# Cypher generation template
 cypher_generation_template = """
 You are an expert Neo4j Cypher translator who converts English to Cypher based on the Neo4j Schema provided, following the instructions below:
 1. Generate Cypher query compatible ONLY for Neo4j Version 5
 2. Do not use EXISTS, SIZE, HAVING keywords in the cypher. Use alias when using the WITH keyword
 3. Use only Nodes and relationships mentioned in the schema
-4. Always do a case-insensitive and fuzzy search for any properties related search. Eg: to search for a Client, use `toLower(client.id) contains 'neo4j'`. To search for Slack Messages, use 'toLower(SlackMessage.text) contains 'neo4j'`. To search for a project, use `toLower(project.summary) contains 'logistics platform' OR toLower(project.name) contains 'logistics platform'`.)
+4. Always do a case-insensitive and fuzzy search for any properties related search. Eg: to search for a Client, use `toLower(client.id) contains 'neo4j'`. To search for Slack Messages, use 'toLower(SlackMessage.text) contains 'neo4j'`. To search for a project, use `toLower(project.summary) contains 'logistics platform' OR toLower(project.name) contains 'logistics platform'`.
 5. Never use relationships that are not mentioned in the given schema
 6. When asked about projects, Match the properties using case-insensitive matching and the OR-operator, E.g, to find a logistics platform -project, use `toLower(project.summary) contains 'logistics platform' OR toLower(project.name) contains 'logistics platform'`.
 7. In every request, you should select the project_id that is given at that moment.
+8. And most importantly consider only nodes and relations with the specified project_id in the schema
 
 schema: {schema}
 
@@ -54,8 +60,8 @@ Question: {question}
 """
 
 cypher_prompt = PromptTemplate(
-    template = cypher_generation_template,
-    input_variables = ["schema", "question"]
+    template=cypher_generation_template,
+    input_variables=["schema", "question"]
 )
 
 CYPHER_QA_TEMPLATE = """You are an assistant that helps to form nice and human understandable answers.
@@ -85,13 +91,16 @@ qa_prompt = PromptTemplate(
 print(os.environ['OPENAI_API_KEY'])
 
 try:
-    graph = Neo4jGraph(url = os.environ['NEO4JURL'], username=os.environ['NEO4JUSER'], password=os.environ['NEO4JPASSWORD'], database=os.environ['NEO4J_DEFAULT_DB'])
-    
+    graph = Neo4jGraph(
+        url=os.environ['NEO4JURL'],
+        username=os.environ['NEO4JUSER'],
+        password=os.environ['NEO4JPASSWORD'],
+        database=os.environ['NEO4J_DEFAULT_DB']
+    )
     graph.refresh_schema()
-        
 
     cypher_chain = GraphCypherQAChain.from_llm(
-        llm=ChatOpenAI(temperature=0, model_name='gpt-4', max_tokens = 8192), # type: ignore
+        llm=ChatOpenAI(temperature=0, model_name='gpt-4', max_tokens=MAX_OUTPUT_TOKENS),  # type: ignore
         graph=graph,
         verbose=True,
         return_intermediate_steps=False,
@@ -99,7 +108,12 @@ try:
         qa_prompt=qa_prompt
     )
 
-except Exception as e: raise ValueError(str(e))
+except Exception as e:
+    raise ValueError(str(e))
+
+# Helper function to truncate input messages
+def truncate_input(input_text, max_length):
+    return input_text[:max_length] if len(input_text) > max_length else input_text
 
 async def get_bot_response(message, project_id):
     try:
@@ -107,7 +121,7 @@ async def get_bot_response(message, project_id):
     except Exception as e:
         print(str(e))
         try:
-            message = {"result" : str(e)} # type: ignore
+            message = {"result" : re.search("\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
         except Exception as e: 
-            message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way.", "error_message" : str(e)}
+            message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
     return message["result"]
