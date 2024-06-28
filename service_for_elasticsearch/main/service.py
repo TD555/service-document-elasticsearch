@@ -2100,4 +2100,4 @@ async def chat():
     try:
         response = await chat_with_AI.get_bot_response(user_input, project_id)
         return jsonify({"response": response})
-    except Exception as e: abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4J_URI"]}'))
+    except Exception as e: abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4JURL"]}'))
