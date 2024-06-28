@@ -82,10 +82,10 @@ qa_prompt = PromptTemplate(
     input_variables=["context", "question"], template=CYPHER_QA_TEMPLATE
 )
 
-print(os.environ['NEO4J_URI'])
+print(os.environ['OPENAI_API_KEY'])
 
 try:
-    graph = Neo4jGraph()
+    graph = Neo4jGraph(url = os.environ['NEO4JURL'], username=os.environ['NEO4JUSER'], password=os.environ['NEO4JPASSWORD'])
     
     graph.refresh_schema()
         
@@ -105,7 +105,9 @@ async def get_bot_response(message, project_id):
     try:
         message = cypher_chain(message + f" (project_id : {project_id})")
     except Exception as e:
+        print(str(e))
         try:
             message = {"result" : re.search("\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
-        except: message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
+        except Exception as e: 
+            message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
     return message["result"]
