@@ -52,9 +52,8 @@ services:
       NEO4JURL: ${NEO4JURL}
       NEO4JUSER: ${NEO4JUSER}
       NEO4JPASSWORD: ${NEO4JPASSWORD}
+      NEO4J_DEFAULT_DB: ${NEO4J_DEFAULT_DB}
     restart: always
-    networks:
-      - shared_network
 
 volumes:
   elasticsearch_data:

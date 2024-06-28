@@ -85,7 +85,7 @@ qa_prompt = PromptTemplate(
 print(os.environ['OPENAI_API_KEY'])
 
 try:
-    graph = Neo4jGraph(url = os.environ['NEO4JURL'], username=os.environ['NEO4JUSER'], password=os.environ['NEO4JPASSWORD'])
+    graph = Neo4jGraph(url = os.environ['NEO4JURL'], username=os.environ['NEO4JUSER'], password=os.environ['NEO4JPASSWORD'], database=os.environ['NEO4J_DEFAULT_DB'])
     
     graph.refresh_schema()
         
