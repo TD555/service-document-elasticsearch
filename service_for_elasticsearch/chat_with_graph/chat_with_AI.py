@@ -3,12 +3,10 @@ from langchain_community.graphs import Neo4jGraph
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 import os
+import re
 from dotenv import load_dotenv
-
-# Load environment variables
 load_dotenv()
 
-# Define the cypher generation template
 cypher_generation_template = """
 You are an expert Neo4j Cypher translator who converts English to Cypher based on the Neo4j Schema provided, following the instructions below:
 1. Generate Cypher query compatible ONLY for Neo4j Version 5
@@ -55,13 +53,11 @@ ORDER BY NumberOfTechnologies DESC```
 Question: {question}
 """
 
-# Define the PromptTemplate for Cypher generation
 cypher_prompt = PromptTemplate(
-    template=cypher_generation_template,
-    input_variables=["schema", "question"]
+    template = cypher_generation_template,
+    input_variables = ["schema", "question"]
 )
 
-# Define the QA Template
 CYPHER_QA_TEMPLATE = """You are an assistant that helps to form nice and human understandable answers.
 The questions will be asked through the AI chat of the Araks system, during which you have to answer the questions asked by the user.
 Answers must be specific to the graph with project_id only.
@@ -75,53 +71,43 @@ The response should not specify which project ID it is referring to and it is no
 In case of a question about specific nodes, give answers about specific nodes.
 All graphs are located in Araks, which is a web-graph service that works with graphs, you can mention about Araks sometimes in your response.
 Answers must be formulated taking into account the limits of the model (4096 tokens).
-In case of a question about a particular node or connection, try to give all the information about it, taking into account the limits of the model (4096 tokens).
+In case of a question about a particular node or connection, try to give all the information about it, taking into account its properties and connections.
+Information:
+{context}
+
 Question: {question}
-Cypher Query Result: {result}
-Answer: """
-
-qa_prompt = PromptTemplate(
-    template=CYPHER_QA_TEMPLATE,
-    input_variables=["question", "result"]
-)
-
-# Create the ChatOpenAI instance with the OpenAI API key from environment variables
-openai_llm = ChatOpenAI(
-    temperature=0,
-    openai_api_key=os.getenv("OPENAI_API_KEY")
-)
-
-# Define the Neo4j connection parameters from environment variables
-neo4j_url = os.getenv("NEO4JURL")
-neo4j_username = os.getenv("NEO4JUSER")
-neo4j_password = os.getenv("NEO4JPASSWORD")
-
-# Example schema, replace this with your actual schema
-example_schema = """
-Node labels: Person, Project, Client, Technology
-Relationship types: HAS_CLIENT, HAS_PEOPLE, USES_TECH
 """
 
-# Initialize the Neo4jGraph with connection details
-graph = Neo4jGraph(
-    url=neo4j_url,
-    username=neo4j_username,
-    password=neo4j_password
+qa_prompt = PromptTemplate(
+    input_variables=["context", "question"], template=CYPHER_QA_TEMPLATE
 )
 
-# Create the GraphCypherQAChain with the initialized components
-qa_chain = GraphCypherQAChain.from_llm(
-    graph=graph,
-    cypher_prompt=cypher_prompt,
-    qa_prompt=qa_prompt,
-    llm=openai_llm
-)
+print(os.environ['OPENAI_API_KEY'])
 
-# Example question, replace this with your actual question
-question = "Tell me about a person named 'Marie Curie'?"
+try:
+    graph = Neo4jGraph(url = os.environ['NEO4JURL'], username=os.environ['NEO4JUSER'], password=os.environ['NEO4JPASSWORD'])
+    
+    graph.refresh_schema()
+        
 
-# Run the QA chain with the example schema and question
-response = qa_chain.run(schema=example_schema, question=question)
+    cypher_chain = GraphCypherQAChain.from_llm(
+        llm=ChatOpenAI(temperature=0, model_name='gpt-4'), # type: ignore
+        graph=graph,
+        verbose=True,
+        return_intermediate_steps=False,
+        cypher_prompt=cypher_prompt,
+        qa_prompt=qa_prompt
+    )
 
-# Print the response
-print(response)
+except Exception as e: raise ValueError(str(e))
+
+async def get_bot_response(message, project_id):
+    try:
+        message = cypher_chain(message + f" (project_id : {project_id})")
+    except Exception as e:
+        print(str(e))
+        try:
+            message = {"result" : re.search("\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
+        except Exception as e: 
+            message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way."}
+    return message["result"]
