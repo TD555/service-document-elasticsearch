@@ -107,7 +107,7 @@ async def get_bot_response(message, project_id):
     except Exception as e:
         print(str(e))
         try:
-            message = {"result" : re.search("\"Answer: (.*)\"", str(e)).group(1)} # type: ignore
+            message = {"result" : str(e)} # type: ignore
         except Exception as e: 
             message = {"result" : "Sorry, but I don't know the answer to your question, please try to ask the question in a slightly different way.", "error_message" : str(e)}
     return message["result"]
