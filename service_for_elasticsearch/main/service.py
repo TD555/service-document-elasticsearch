@@ -1695,6 +1695,88 @@ async def get_related_docs(keyword, url, project_id):
         }
     )
 
+from rapidfuzz import fuzz
+
+TAXONOMY = ['Substance Sensing',
+            'Nicotine Transportation',
+            'Accessories',
+            'Manufacturing',
+            'Chewing',
+            'Absorption',
+            'Puff Control',
+            'Mouth-Piece Filter',
+            'Gaming',
+            'Nicotine Dose',
+            'Ritual',
+            'Sensory Experience',
+            'Size Coherence',
+            'Storing',
+            'Visual',
+            'Capsules',
+            'Connectivity',
+            'Duration Of Experience',
+            'Power Management And Charging',
+            'Toxicology',
+            'User Authentication',
+            'Consumption Monitoring',
+            'Dose',
+            'Size',
+            'Vending',
+            'Properties',
+            'Using',
+            'Purity',
+            'Hallow Acetate Tube',
+            'Cleaning',
+            'Customization',
+            'Finishing',
+            'Device',
+            'Device Management',
+            'Leakage Prevention',
+            'Short Circuit Protection',
+            'Ecosystems',
+            'Aerosolization',
+            'Mouth-End Paper',
+            'Device Functional',
+            'Taste',
+            'Transportability',
+            'Extinguisher',
+            'Aerosol Control',
+            'Composition',
+            'Child Proof',
+            'Airflow',
+            'Outer Paper',
+            'Filter',
+            'Charging',
+            'Substrate Hosting',
+            'Shaking',
+            'Wearable',
+            'Heating',
+            'Packaging',
+            'Material',
+            'Filters',
+            'Ignition Propensity',
+            'Overheat Protection',
+            'Flavor',
+            'Satisfaction',
+            'Porous Matrix Material',
+            'Safety',
+            'Absorbability',
+            'Shape Coherence',
+            'Polymer Film Filter',
+            'Haptic',
+            'Events',
+            'Action',
+            'Heat Control',
+            'Heating Profile',
+            'Wrapped Paper',
+            'Cartridge',
+            'Consumable Detect',
+            'Recognition',
+            'Flavor',
+            'Taste',
+            'Container',
+            'Storage']
+
 
 @ app.route('/generate_tags', methods=["POST"])
 async def generate_tags():
@@ -1718,6 +1800,7 @@ async def generate_tags():
         keywords = result[0]['_source']
         for i, keyword in enumerate(keywords['keywords']):
             result = (await get_related_docs(keyword['name'], url, project_id))['hits']['hits']
+            keywords['keywords'][i]['taxonomy'] = [taxonomy for taxonomy in TAXONOMY  if fuzz.token_sort_ratio(taxonomy, keyword['name']) > 80]
             keywords['keywords'][i]['count'] = len(result)
 
         return jsonify(**keywords,  **{'url': url}, **{'status': 200})
@@ -1736,7 +1819,7 @@ async def get_similar_docs():
         abort(400, "Invalid raw data")
 
     get_all_tags = await get_tags(url, project_id)
-    
+
     if get_all_tags['hits']['hits']:
         result = get_all_tags['hits']['hits'][0]['inner_hits']["property.data"]['hits']['hits']
 
@@ -1754,7 +1837,7 @@ async def get_similar_docs():
                 response_dict.update(node["_source"])
                 for property in node['inner_hits']["property"]['hits']['hits']:
                     all_dict[keyword['name']].extend([property_data["_source"]['url']
-                                                 for property_data in property['inner_hits']["property.data"]['hits']['hits']])
+                                                      for property_data in property['inner_hits']["property.data"]['hits']['hits']])
                     response_dict.update(
                         {"property_" + k: v for k, v in property["_source"].items()})
                     for property_data in property['inner_hits']["property.data"]['hits']['hits']:
@@ -1764,6 +1847,7 @@ async def get_similar_docs():
                         if response_dict not in data:
                             data.append(response_dict.copy())
             keywords['keywords'][i]['count'] = len(related_docs)
+            keywords['keywords'][i]['taxonomy'] = [taxonomy for taxonomy in TAXONOMY  if fuzz.token_sort_ratio(taxonomy, keyword['name']) > 80]
 
         all_urls = []
 
@@ -1801,7 +1885,7 @@ async def expand_tag():
                 response_dict.update(property_data["_source"])
                 data.append(response_dict.copy())
 
-    return jsonify({'data': data, 'status': 200})
+    return jsonify({'data': data, 'taxonomy' : [taxonomy for taxonomy in TAXONOMY  if fuzz.token_sort_ratio(taxonomy, keyword) > 80], 'status': 200})
 
 
 namespace = uuid.NAMESPACE_DNS
@@ -2074,7 +2158,7 @@ async def migration():
                                  new_index_list[i]['property'][j]['data'][k]['content']))
 
         thread = threading.Thread(target=update_keywords, kwargs={
-            'items': [item for item in [item_ for item_ in items if item_[1]]], 'check_keywords' : False})
+            'items': [item for item in [item_ for item_ in items if item_[1]]], 'check_keywords': False})
 
         thread.start()
 
@@ -2088,10 +2172,10 @@ async def migration():
 
 @ app.route('/chat', methods=['POST'])
 async def chat():
-    
-    user_input:str = request.json.get("message")
-    project_id:str = request.json.get("project_id")
-    
+
+    user_input: str = request.json.get("message")
+    project_id: str = request.json.get("project_id")
+
     if user_input.lower().strip() in ['hi', 'hello', 'hey']:
         return jsonify({"response": 'Hi, how can I help with getting information about your graph?'})
     if not user_input:
@@ -2100,7 +2184,8 @@ async def chat():
     try:
         response = await chat_with_AI.get_bot_response(user_input, project_id)
         return jsonify({"response": response})
-    except Exception as e: 
+    except Exception as e:
         if 'ERROR_MESSAGE' in globals():
             abort(503, ValueError(ERROR_MESSAGE))
-        abort(503, ValueError(f'Cannot resolve address {os.environ["NEO4JURL"]}'))
+        abort(503, ValueError(
+            f'Cannot resolve address {os.environ["NEO4JURL"]}'))
