@@ -53,11 +53,11 @@ ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
 AMAZON_URL = os.environ['AMAZON_URL']
 ES_HOST = os.environ['ELASTICSEARCH_URL']
 
-DATABASE_NAME = os.environ['DB_NAME']
-DATABASE_USER = os.environ['DB_USER']
-DATABASE_HOST = os.environ['DB_HOST']
-DATABASE_PASSWORD = os.environ['DB_PASSWORD']
-DATABASE_PORT = os.environ['DB_PORT']
+DATABASE_NAME = os.environ.get('DB_NAME', '')
+DATABASE_USER = os.environ.get('DB_USER', '')
+DATABASE_HOST = os.environ.get('DB_HOST', '')
+DATABASE_PASSWORD = os.environ.get('DB_PASSWORD', '')
+DATABASE_PORT = os.environ.get('DB_PORT', '')
 
 es = Elasticsearch([ES_HOST])
 
@@ -1890,8 +1890,8 @@ async def expand_tag():
 
 namespace = uuid.NAMESPACE_DNS
 
-SEARCH_URL = 'https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key=0587a88dd5dcd5fab78a8bf379542622b509'
-FETCH_URL = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key=0587a88dd5dcd5fab78a8bf379542622b509"
+SEARCH_URL = os.environ['SEARCH_URL']
+FETCH_URL = os.environ['FETCH_URL']
 
 
 def convert_date(pubDate):
