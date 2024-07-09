@@ -1890,8 +1890,9 @@ async def expand_tag():
 
 namespace = uuid.NAMESPACE_DNS
 
-SEARCH_URL = os.environ['SEARCH_URL']
-FETCH_URL = os.environ['FETCH_URL']
+SEARCH_URL = os.environ['SEARCH_URL'] + '?db=pubmed&term={keyword}&retmode=json&retmax={limit}&retstart={offset}&api_key={api_key}'
+FETCH_URL = os.environ['FETCH_URL'] + "?db=pubmed&id={id}&rettype=medline&retmode=xml&api_key={api_key}"
+PUBMED_API_KEY = os.environ['PUBMED_API_KEY']
 
 
 def convert_date(pubDate):
@@ -1919,7 +1920,7 @@ def convert_to_text(item, abstract=False):
 async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
         try:
-            async with session.get(FETCH_URL.format(id=id.strip()), timeout=timeout) as response:
+            async with session.get(FETCH_URL.format(id=id.strip(), api_key=PUBMED_API_KEY), timeout=timeout) as response:
                 response.raise_for_status()
                 xml_file = await response.text()
                 xml_data = ET.fromstring(xml_file)
@@ -1998,7 +1999,7 @@ async def fetch_with_retry(session, id, retry_attempts=10, timeout=10):
 async def search_with_retry(session, keyword, limit, offset, retry_attempts=10, timeout=10):
     for attempt in range(retry_attempts):
         try:
-            async with session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=offset), timeout=timeout) as response:
+            async with session.get(SEARCH_URL.format(keyword=keyword, limit=limit, offset=offset, api_key=PUBMED_API_KEY), timeout=timeout) as response:
                 response.raise_for_status()
                 return await response.json()
         except (aiohttp.ClientError, asyncio.TimeoutError) as ce:
