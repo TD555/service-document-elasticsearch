@@ -53,11 +53,11 @@ ES_INDEX = os.environ['ELASTICSEARCH_NEW_INDEX']
 AMAZON_URL = os.environ['AMAZON_URL']
 ES_HOST = os.environ['ELASTICSEARCH_URL']
 
-DATABASE_NAME = os.environ['DB_NAME']
-DATABASE_USER = os.environ['DB_USER']
-DATABASE_HOST = os.environ['DB_HOST']
-DATABASE_PASSWORD = os.environ['DB_PASSWORD']
-DATABASE_PORT = os.environ['DB_PORT']
+DATABASE_NAME = os.environ.get('DB_NAME', '')
+DATABASE_USER = os.environ.get('DB_USER', '')
+DATABASE_HOST = os.environ.get('DB_HOST', '')
+DATABASE_PASSWORD = os.environ.get('DB_PASSWORD', '')
+DATABASE_PORT = os.environ.get('DB_PORT', '')
 
 es = Elasticsearch([ES_HOST])
 
